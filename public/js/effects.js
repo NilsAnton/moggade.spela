@@ -107,6 +107,7 @@ const _v = new THREE.Vector3();
 
 export class Effects {
   constructor(scene) {
+    this.scene = scene;
     this.sparks = new Particles(scene, 600, { size: 0.07, additive: true, gravity: 14, drag: 1.5 });
     this.dust = new Particles(scene, 300, { size: 0.45, additive: false, gravity: -0.4, drag: 3 });
     this.blood = new Particles(scene, 300, { size: 0.1, additive: false, gravity: 9, drag: 1 });
@@ -183,6 +184,29 @@ export class Effects {
     this.blood.emit(p, dir.clone().negate(), 6, { speed: 1.5, spread: 1, life: 0.4, color: [0.4, 0.01, 0.02, 0.9] });
   }
 
+  shockwave(p) {
+    if (!this.ring) {
+      this.ring = new THREE.Mesh(
+        new THREE.RingGeometry(0.8, 1, 48).rotateX(-Math.PI / 2),
+        new THREE.MeshBasicMaterial({ color: new THREE.Color(2, 1.4, 0.8), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }),
+      );
+      this.ring.visible = false;
+      this.scene.add(this.ring);
+    }
+    this.ring.position.set(p.x, p.y + 0.05, p.z);
+    this.ring.userData.t = 0;
+    this.ring.visible = true;
+    for (let i = 0; i < 24; i++) {
+      const a = (i / 24) * Math.PI * 2;
+      this.dust.emit(p, _v.set(Math.cos(a), 0.3, Math.sin(a)), 2, { speed: 9, spread: 0.2, life: 0.8, color: [0.6, 0.55, 0.5, 0.6] });
+    }
+    this.sparks.emit(p, _v.set(0, 1, 0), 30, { speed: 8, spread: 1, life: 0.4, color: [2.5, 1.7, 0.8, 1] });
+  }
+
+  heal(p) {
+    this.sparks.emit(p, _v.set(0, 1, 0), 30, { speed: 2.5, spread: 0.8, life: 0.7, color: [0.4, 2.2, 0.8, 1] });
+  }
+
   flash(p) {
     const s = this.flashes[this.fi++ % this.flashes.length];
     s.position.copy(p);
@@ -205,6 +229,15 @@ export class Effects {
       t.mesh.position.copy(t.a).addScaledVector(t.dir, tail);
       t.mesh.lookAt(_v.copy(t.mesh.position).add(t.dir));
       t.mesh.scale.set(0.02, 0.02, Math.max(0.01, head - tail));
+    }
+
+    if (this.ring?.visible) {
+      const r = this.ring;
+      r.userData.t += dt;
+      const k = r.userData.t / 0.45;
+      r.scale.setScalar(0.5 + k * 5);
+      r.material.opacity = Math.max(0, 1 - k);
+      if (k >= 1) r.visible = false;
     }
 
     for (const s of this.flashes) {

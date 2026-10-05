@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { MAPS } from '../public/js/maps.js';
 import { WEAPONS, damageAt } from '../public/js/weapons.js';
+import { CHARACTERS, SLAM, STIM_HP } from '../public/js/characters.js';
 import { makeSolids, rayBox, hitboxes, PLAYER } from '../public/js/physics.js';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -14,7 +15,6 @@ const MAX_PLAYERS = Number(process.env.MAX_PLAYERS) || 16;
 const ROUND_MS = (Number(process.env.ROUND_MINUTES) || 8) * 60000;
 
 const TICK_MS = 50;
-const MAX_HP = 100;
 const RESPAWN_MS = 3000;
 const PROTECT_MS = 1500;
 const RANGE = 300;
@@ -44,7 +44,7 @@ const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 8192 });
 const r2 = (v) => Math.round(v * 100) / 100;
 const r3 = (v) => Math.round(v * 1000) / 1000;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-const weaponIndex = (w) => (Number.isInteger(w) && WEAPONS[w] ? w : 0);
+const charIndex = (c) => (Number.isInteger(c) && CHARACTERS[c] ? c : 0);
 const roundLeft = () => Math.max(0, ROUND_MS - (Date.now() - roundStartedAt));
 
 function send(p, msg) {
@@ -72,7 +72,7 @@ function sendRoster() {
     t: 'roster',
     killLimit: KILL_LIMIT,
     list: [...players.values()].map((p) => ({
-      id: p.id, name: p.name, color: p.color, k: p.kills, d: p.deaths, ping: Math.round(p.rtt), w: p.weapon,
+      id: p.id, name: p.name, color: p.color, k: p.kills, d: p.deaths, ping: Math.round(p.rtt), w: p.weapon, c: p.char,
     })),
   });
 }
@@ -90,31 +90,35 @@ function spawn(p) {
       if (d > bestD) { bestD = d; best = s; }
     }
   }
-  p.weapon = p.nextWeapon;
+  p.char = p.nextChar;
+  p.weapon = CHARACTERS[p.char].weapon;
+  p.maxHp = CHARACTERS[p.char].hp;
+  p.lastAbility = 0;
+  p.sl = 0;
   p.x = best[0]; p.y = best[1]; p.z = best[2];
   p.yaw = Math.atan2(best[0], best[2]);
   p.pitch = 0;
-  p.hp = MAX_HP;
+  p.hp = p.maxHp;
   p.alive = true;
   p.sp++;
   p.streak = 0;
   p.protectUntil = Date.now() + PROTECT_MS;
   p.hist = [];
-  send(p, { t: 'spawn', p: best, yaw: r3(p.yaw), sp: p.sp, w: p.weapon });
+  send(p, { t: 'spawn', p: best, yaw: r3(p.yaw), sp: p.sp, c: p.char, hp: p.maxHp });
 }
 
 function posAt(p, t) {
   const h = p.hist;
-  if (!h.length || t >= h[h.length - 1].t) return [p.x, p.y, p.z];
-  if (t <= h[0].t) return [h[0].x, h[0].y, h[0].z];
+  if (!h.length || t >= h[h.length - 1].t) return [p.x, p.y, p.z, p.sl];
+  if (t <= h[0].t) return [h[0].x, h[0].y, h[0].z, h[0].sl];
   for (let i = h.length - 1; i > 0; i--) {
     const a = h[i - 1], b = h[i];
     if (a.t <= t) {
       const k = (t - a.t) / (b.t - a.t || 1);
-      return [a.x + (b.x - a.x) * k, a.y + (b.y - a.y) * k, a.z + (b.z - a.z) * k];
+      return [a.x + (b.x - a.x) * k, a.y + (b.y - a.y) * k, a.z + (b.z - a.z) * k, b.sl];
     }
   }
-  return [p.x, p.y, p.z];
+  return [p.x, p.y, p.z, p.sl];
 }
 
 function onState(p, m) {
@@ -127,6 +131,7 @@ function onState(p, m) {
   p.yaw = Number(m.y) || 0;
   p.pitch = clamp(Number(m.x) || 0, -1.6, 1.6);
   p.mv = m.m ? 1 : 0;
+  p.sl = m.s ? 1 : 0;
 }
 
 function onShoot(p, m) {
@@ -148,7 +153,7 @@ function onShoot(p, m) {
   for (const q of players.values()) {
     if (q === p || !q.alive) continue;
     const pos = posAt(q, t);
-    targets.push({ q, hb: hitboxes(pos[0], pos[1], pos[2]) });
+    targets.push({ q, hb: hitboxes(pos[0], pos[1], pos[2], !!pos[3]) });
   }
 
   const dmg = new Map();
@@ -181,23 +186,55 @@ function onShoot(p, m) {
   for (const [victim, { amount, head }] of dmg) damage(victim, p, amount, head);
 }
 
-function damage(v, a, amount, head) {
+function onAbility(p) {
+  const ch = CHARACTERS[p.char];
+  const now = Date.now();
+  if (!p.alive || roundEndsAt || now - p.lastAbility < ch.ability.cooldown * 0.85) return;
+  p.lastAbility = now;
+  if (ch.ability.id === 'stim') {
+    p.hp = Math.min(p.maxHp, p.hp + STIM_HP);
+    broadcast({ t: 'fx', k: 'stim', id: p.id });
+  } else if (ch.ability.id === 'slam') {
+    p.protectUntil = 0;
+    broadcast({ t: 'fx', k: 'slam', id: p.id, p: [r2(p.x), r2(p.y), r2(p.z)] });
+    for (const q of [...players.values()]) {
+      if (q === p || !q.alive) continue;
+      const d = Math.hypot(q.x - p.x, q.z - p.z);
+      if (d > SLAM.radius || Math.abs(q.y - p.y) > 2.5) continue;
+      damage(q, p, Math.round(SLAM.damage * (1 - (d / SLAM.radius) * 0.5)), false, 'slam');
+    }
+  }
+}
+
+function onVote(p, m) {
+  if (!roundEndsAt || !Number.isInteger(m.m) || !MAPS[m.m]) return;
+  p.vote = m.m;
+  broadcast({ t: 'votes', v: voteCounts() });
+}
+
+function voteCounts() {
+  const v = MAPS.map(() => 0);
+  for (const p of players.values()) if (p.vote >= 0) v[p.vote]++;
+  return v;
+}
+
+function damage(v, a, amount, head, how) {
   if (!v.alive || Date.now() < v.protectUntil) return;
   v.hp = Math.max(0, v.hp - amount);
   const kill = v.hp <= 0;
   send(a, { t: 'hc', head, kill });
   send(v, { t: 'hurt', hp: v.hp, from: [r2(a.x), r2(a.z)] });
-  if (kill) killPlayer(v, a, head);
+  if (kill) killPlayer(v, a, head, how);
 }
 
-function killPlayer(v, a, head) {
+function killPlayer(v, a, head, how) {
   v.alive = false;
   v.deaths++;
   v.streak = 0;
   v.respawnAt = Date.now() + RESPAWN_MS;
   a.kills++;
   a.streak++;
-  broadcast({ t: 'kill', k: a.id, v: v.id, head, streak: a.streak, w: a.weapon });
+  broadcast({ t: 'kill', k: a.id, v: v.id, head, streak: a.streak, w: a.weapon, how });
   sendRoster();
   if (a.kills >= KILL_LIMIT) endRound(a);
 }
@@ -205,14 +242,21 @@ function killPlayer(v, a, head) {
 function endRound(winner) {
   if (roundEndsAt) return;
   roundEndsAt = Date.now() + ROUND_PAUSE_MS;
-  const next = MAPS[(mapIndex + 1) % MAPS.length].name;
-  broadcast({ t: 'roundEnd', winner: winner?.id ?? null, ms: ROUND_PAUSE_MS, next });
+  for (const p of players.values()) p.vote = -1;
+  broadcast({ t: 'roundEnd', winner: winner?.id ?? null, ms: ROUND_PAUSE_MS, maps: MAPS.map((m) => m.name), current: mapIndex });
 }
 
 function startRound() {
   roundEndsAt = 0;
   roundStartedAt = Date.now();
-  mapIndex = (mapIndex + 1) % MAPS.length;
+  const votes = voteCounts();
+  const top = Math.max(...votes);
+  if (top > 0) {
+    const best = votes.map((n, i) => (n === top ? i : -1)).filter((i) => i >= 0);
+    mapIndex = best[Math.floor(Math.random() * best.length)];
+  } else {
+    mapIndex = (mapIndex + 1) % MAPS.length;
+  }
   map = MAPS[mapIndex];
   solids = makeSolids(map.boxes);
   broadcast({ t: 'roundStart', map: mapIndex, left: roundLeft() });
@@ -237,12 +281,13 @@ wss.on('connection', (ws) => {
         return;
       }
       const id = nextId++;
-      const w = weaponIndex(m.w);
+      const ch = charIndex(m.c);
       p = {
         id, ws,
         name: cleanName(m.name, id),
         color: COLORS.includes(m.color) ? m.color : COLORS[id % COLORS.length],
-        weapon: w, nextWeapon: w,
+        char: ch, nextChar: ch, weapon: CHARACTERS[ch].weapon, maxHp: CHARACTERS[ch].hp,
+        lastAbility: 0, sl: 0, vote: -1,
         x: 0, y: 0, z: 0, yaw: 0, pitch: 0, mv: 0,
         hp: 0, alive: false, sp: 0, kills: 0, deaths: 0, streak: 0,
         lastShot: 0, rtt: 80, respawnAt: 0, protectUntil: 0, hist: [],
@@ -258,7 +303,9 @@ wss.on('connection', (ws) => {
     switch (m.t) {
       case 'st': onState(p, m); break;
       case 'sh': onShoot(p, m); break;
-      case 'loadout': p.nextWeapon = weaponIndex(m.w); break;
+      case 'loadout': p.nextChar = charIndex(m.c); break;
+      case 'ab': onAbility(p); break;
+      case 'vote': onVote(p, m); break;
       case 'pong': if (Number.isFinite(m.s)) p.rtt = clamp(Date.now() - m.s, 0, 1000); break;
     }
   });
@@ -288,7 +335,7 @@ setInterval(() => {
       if (!roundEndsAt && now >= p.respawnAt) spawn(p);
       continue;
     }
-    p.hist.push({ t: now, x: p.x, y: p.y, z: p.z });
+    p.hist.push({ t: now, x: p.x, y: p.y, z: p.z, sl: p.sl });
     while (p.hist.length && now - p.hist[0].t > HISTORY_MS) p.hist.shift();
   }
 
@@ -298,7 +345,7 @@ setInterval(() => {
     ts: now,
     p: [...players.values()].map((q) => [
       q.id, r2(q.x), r2(q.y), r2(q.z), r3(q.yaw), r3(q.pitch),
-      q.hp, q.alive ? 1 : 0, q.sp, now < q.protectUntil ? 1 : 0, q.mv,
+      q.hp, q.alive ? 1 : 0, q.sp, now < q.protectUntil ? 1 : 0, q.mv, q.sl, q.maxHp,
     ]),
   });
 }, TICK_MS);

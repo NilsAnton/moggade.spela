@@ -111,6 +111,30 @@ export class Sound {
     if (local) this.noiseHit(out, t, 0.03, { type: 'highpass', f0: 3200, f1: 2000, g0: 0.35 });
   }
 
+  slam(dist = 0, pan = 0) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime, out = this.out(0.8 / (1 + dist * 0.1), pan, 0.8);
+    this.tone(out, t, 0.5, { f0: 120, f1: 30, g0: 1 });
+    this.noiseHit(out, t, 0.4, { f0: 2000, f1: 100, g0: 0.8 });
+  }
+
+  whoosh() {
+    if (!this.ctx) return;
+    this.noiseHit(this.out(0.25), this.ctx.currentTime, 0.25, { type: 'bandpass', f0: 600, f1: 2400, q: 1.2 });
+  }
+
+  slide() {
+    if (!this.ctx) return;
+    this.noiseHit(this.out(0.15), this.ctx.currentTime, 0.5, { type: 'lowpass', f0: 1500, f1: 300 });
+  }
+
+  stim() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime, out = this.out(0.25, 0, 0.4);
+    this.tone(out, t, 0.3, { type: 'triangle', f0: 500, f1: 1000, g0: 0.4 });
+    this.tone(out, t + 0.12, 0.35, { type: 'sine', f0: 1200, g0: 0.25 });
+  }
+
   bolt() {
     if (!this.ctx) return;
     const t = this.ctx.currentTime, out = this.out(0.3);

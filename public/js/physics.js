@@ -93,8 +93,11 @@ export function raycastWorld(solids, o, d, maxT = 300) {
   return { t: best.t, n };
 }
 
-export function hitboxes(x, y, z) {
-  const { BODY_R, BODY_H, HEAD_R, HEAD_TOP } = HITBOX;
+// low = glider: hela kroppen blir lägre
+export function hitboxes(x, y, z, low = false) {
+  const { BODY_R, HEAD_R } = HITBOX;
+  const BODY_H = low ? 0.85 : HITBOX.BODY_H;
+  const HEAD_TOP = low ? 1.3 : HITBOX.HEAD_TOP;
   return {
     head: { min: [x - HEAD_R, y + BODY_H, z - HEAD_R], max: [x + HEAD_R, y + HEAD_TOP, z + HEAD_R] },
     body: { min: [x - BODY_R, y, z - BODY_R], max: [x + BODY_R, y + BODY_H, z + BODY_R] },

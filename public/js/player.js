@@ -102,7 +102,8 @@ export class RemotePlayer {
     this.tagTex.needsUpdate = true;
   }
 
-  push(ts, x, y, z, yaw, pitch, alive, sp, prot) {
+  push(ts, x, y, z, yaw, pitch, alive, sp, prot, sl) {
+    this.sliding = !!sl;
     if (sp !== this.sp) { this.sp = sp; this.buf.length = 0; }
     this.buf.push({ t: ts, x, y, z, yaw, pitch });
     if (this.buf.length > 40) this.buf.shift();
@@ -162,6 +163,14 @@ export class RemotePlayer {
     const amp = this.alive ? Math.min(spd / 5, 1) * 0.7 : 0;
     this.legL.rotation.x = Math.sin(this.walk) * amp;
     this.legR.rotation.x = -Math.sin(this.walk) * amp;
+
+    // glidning: luta bakåt och sänk kroppen
+    this.slideK = (this.slideK ?? 0) + ((this.sliding && this.alive ? 1 : 0) - (this.slideK ?? 0)) * Math.min(1, dt * 14);
+    if (this.alive) {
+      this.body.rotation.x = this.slideK * 0.9;
+      this.body.position.y = -this.slideK * 0.35;
+      if (this.slideK > 0.1) { this.legL.rotation.x = -this.slideK * 1.2; this.legR.rotation.x = -this.slideK * 0.9; }
+    }
 
     if (!this.alive && this.deathT > 0) {
       this.deathT += dt;

@@ -6,6 +6,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { PLAYER, makeSolids, moveBody, raycastWorld, rayBox, hitboxes } from './physics.js';
 import { MAPS } from './maps.js';
 import { WEAPONS } from './weapons.js';
+import { CHARACTERS } from './characters.js';
 import { buildWorld } from './world.js';
 import { Effects } from './effects.js';
 import { Sound } from './audio.js';
@@ -24,9 +25,9 @@ const r3 = (v) => Math.round(v * 1000) / 1000;
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 // ---------- inställningar ----------
-const settings = { name: '', color: COLORS[Math.floor(Math.random() * COLORS.length)], sens: 1, vol: 0.7, weapon: 0 };
+const settings = { name: '', color: COLORS[Math.floor(Math.random() * COLORS.length)], sens: 1, vol: 0.7, char: 0 };
 try { Object.assign(settings, JSON.parse(localStorage.getItem('moggade') || '{}')); } catch {}
-if (!WEAPONS[settings.weapon]) settings.weapon = 0;
+if (!CHARACTERS[settings.char]) settings.char = 0;
 const saveSettings = () => { try { localStorage.setItem('moggade', JSON.stringify(settings)); } catch {} };
 
 // ---------- rendering ----------
@@ -72,14 +73,20 @@ const effects = new Effects(scene);
 const sound = new Sound();
 sound.setVolume(settings.vol);
 const weapon = new Weapon(camera, settings.color);
-weapon.setType(WEAPONS[settings.weapon].id);
+weapon.setType(WEAPONS[CHARACTERS[settings.char].weapon].id);
 const flashLight = new THREE.PointLight('#ffb060', 0, 10, 2);
 flashLight.position.set(0.1, -0.05, -0.6);
 camera.add(flashLight);
 
 // ---------- spelstatus ----------
-const me = { id: null, p: [0, 0, 0], v: [0, 0, 0], ground: false, yaw: 0, pitch: 0, hp: 100, alive: false, sp: 0, protect: false, sprint: false, streak: 0 };
-let W = WEAPONS[settings.weapon];
+const me = {
+  id: null, p: [0, 0, 0], v: [0, 0, 0], ground: false, yaw: 0, pitch: 0, hp: 100, maxHp: 100, alive: false, sp: 0,
+  protect: false, sprint: false, streak: 0,
+  slideT: 0, slideCd: 0, dashT: 0, airJumps: 0, slamArmed: false, abilityReady: 0,
+};
+let C = CHARACTERS[settings.char];
+let W = WEAPONS[C.weapon];
+let jumpQueued = false, myVote = -1;
 const gun = { ammo: W.mag, lastShot: 0, reloading: false, reloadStart: 0, reloadEnd: 0, bloom: 0, recoil: 0, trigger: true };
 const remotes = new Map();
 const roster = new Map();
@@ -108,27 +115,31 @@ for (const c of COLORS) {
   $('colors').appendChild(b);
 }
 
-const STAT_NAMES = { dmg: 'Skada', rate: 'Eldhastighet', range: 'Räckvidd', mobility: 'Rörlighet' };
-WEAPONS.forEach((w, i) => {
+CHARACTERS.forEach((ch, i) => {
+  const w = WEAPONS[ch.weapon];
   const card = document.createElement('button');
-  card.className = 'weapon-card' + (i === settings.weapon ? ' active' : '');
+  card.className = 'weapon-card' + (i === settings.char ? ' active' : '');
   card.innerHTML = `
-    <div class="w-head"><span class="w-key">${i + 1}</span><span class="w-name">${w.name}</span></div>
-    <div class="w-desc">${w.desc}</div>
-    ${Object.entries(w.stats).map(([k, v]) => `<div class="stat"><span>${STAT_NAMES[k]}</span><i><b style="width:${v * 100}%"></b></i></div>`).join('')}`;
-  card.onclick = () => selectWeapon(i);
+    <div class="w-head"><span class="w-key">${i + 1}</span><span class="w-name">${ch.name}</span><span class="w-hp">${ch.hp} HP</span></div>
+    <div class="w-desc">${ch.desc}</div>
+    <div class="w-row"><span>Vapen</span><b>${w.name}</b></div>
+    <div class="w-row"><span><kbd>E</kbd></span><b>${ch.ability.name}</b><em>${ch.ability.desc}</em></div>
+    <div class="stat"><span>Skada</span><i><b style="width:${w.stats.dmg * 100}%"></b></i></div>
+    <div class="stat"><span>Fart</span><i><b style="width:${(ch.speed - 0.8) / 0.35 * 100}%"></b></i></div>`;
+  card.onclick = () => selectChar(i);
   $('weapons').appendChild(card);
 });
 
-function selectWeapon(i) {
-  settings.weapon = i;
+function selectChar(i) {
+  settings.char = i;
   saveSettings();
   document.querySelectorAll('.weapon-card').forEach((c, j) => c.classList.toggle('active', j === i));
   if (playing) {
-    send({ t: 'loadout', w: i });
-    $('weapon-note').textContent = me.alive ? `${WEAPONS[i].name} – byts när du spawnar nästa gång` : '';
+    send({ t: 'loadout', c: i });
+    $('weapon-note').textContent = me.alive ? `${CHARACTERS[i].name} – byts när du spawnar nästa gång` : '';
   } else {
-    W = WEAPONS[i];
+    C = CHARACTERS[i];
+    W = WEAPONS[C.weapon];
     weapon.setType(W.id);
   }
 }
@@ -160,11 +171,15 @@ function showMenu(show) {
 addEventListener('keydown', (e) => {
   if (e.code === 'Tab') { e.preventDefault(); if (playing) showScoreboard(true); return; }
   if (!locked) return;
+  if (e.code === 'Space' && !e.repeat) jumpQueued = true;
+  if ((e.code === 'ControlLeft' || e.code === 'KeyC') && !e.repeat) startSlide();
+  if (e.code === 'KeyE' && !e.repeat) useAbility();
   keys[e.code] = true;
   if (e.code === 'KeyR') startReload();
-  // 1–4 byter vapen när du är död
   const n = Number(e.key) - 1;
-  if (!me.alive && WEAPONS[n]) { selectWeapon(n); updateDeathWeapon(); }
+  if (roundOver && MAPS[n]) { myVote = n; send({ t: 'vote', m: n }); renderVotes(); return; }
+  // 1–4 byter gubbe när du är död
+  if (!me.alive && CHARACTERS[n]) { selectChar(n); updateDeathWeapon(); }
 });
 addEventListener('keyup', (e) => {
   keys[e.code] = false;
@@ -202,7 +217,7 @@ document.addEventListener('pointerlockchange', () => {
 function connect() {
   $('status').textContent = 'Ansluter…';
   ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
-  ws.onopen = () => send({ t: 'join', name: settings.name, color: settings.color, w: settings.weapon });
+  ws.onopen = () => send({ t: 'join', name: settings.name, color: settings.color, c: settings.char });
   ws.onmessage = (e) => onMessage(JSON.parse(e.data));
   ws.onclose = () => {
     ws = null;
@@ -236,15 +251,20 @@ function onMessage(m) {
       showMenu(!locked);
       break;
     case 'spawn':
-      W = WEAPONS[m.w] ?? WEAPONS[0];
+      C = CHARACTERS[m.c] ?? CHARACTERS[0];
+      W = WEAPONS[C.weapon];
       weapon.setType(W.id);
+      me.maxHp = m.hp;
+      me.slideT = me.dashT = 0;
+      me.slamArmed = false;
+      me.abilityReady = 0;
       me.p = [...m.p];
       me.v = [0, 0, 0];
       me.yaw = m.yaw;
       me.pitch = 0;
       me.sp = m.sp;
       me.alive = true;
-      me.hp = 100;
+      me.hp = m.hp;
       me.streak = 0;
       gun.ammo = W.mag;
       gun.reloading = false;
@@ -290,7 +310,10 @@ function onMessage(m) {
       roundEndAt = performance.now() + m.ms;
       const w = roster.get(m.winner);
       $('re-title').innerHTML = m.winner === me.id ? 'DU VANN!' : `<span style="color:${w?.color}">${esc(w?.name ?? '?')}</span> VANN`;
-      $('re-next').textContent = `Nästa bana: ${m.next}`;
+      voteMaps = m.maps;
+      votes = m.maps.map(() => 0);
+      myVote = -1;
+      renderVotes();
       $('roundend').classList.remove('hidden');
       firing = false;
       showScoreboard(true);
@@ -305,6 +328,18 @@ function onMessage(m) {
       showScoreboard(false);
       centerMsg(MAPS[m.map].name, 'NY RUNDA');
       break;
+    case 'votes': votes = m.v; renderVotes(); break;
+    case 'fx': {
+      if (m.k === 'slam') {
+        const p = new THREE.Vector3(...m.p);
+        effects.shockwave(p);
+        if (m.id !== me.id) sound.slam(camera.position.distanceTo(p), panFor(p));
+      } else if (m.k === 'stim') {
+        const pos = m.id === me.id ? new THREE.Vector3(me.p[0], me.p[1] + 1, me.p[2]) : remotes.get(m.id)?.pos.clone().setY((remotes.get(m.id)?.pos.y ?? 0) + 1);
+        if (pos) effects.heal(pos);
+      }
+      break;
+    }
     case 'ping': send({ t: 'pong', s: m.s }); break;
     case 'leave': {
       const r = remotes.get(m.id);
@@ -322,8 +357,8 @@ function onSnapshot(m) {
   if (serverOffset === null || Math.abs(off - serverOffset) > 250) serverOffset = off;
   else serverOffset += (off - serverOffset) * 0.05;
 
-  for (const [id, x, y, z, yaw, pitch, hp, alive, sp, prot] of m.p) {
-    if (id === me.id) { me.hp = hp; me.protect = !!prot; continue; }
+  for (const [id, x, y, z, yaw, pitch, hp, alive, sp, prot, , sl, maxHp] of m.p) {
+    if (id === me.id) { me.hp = hp; me.maxHp = maxHp; me.protect = !!prot; continue; }
     let r = remotes.get(id);
     if (!r) {
       r = new RemotePlayer(scene);
@@ -331,7 +366,7 @@ function onSnapshot(m) {
       if (info) { r.setInfo(info.name, info.color); r.setWeapon(info.w); }
       remotes.set(id, r);
     }
-    r.push(m.ts, x, y, z, yaw, pitch, alive, sp, prot);
+    r.push(m.ts, x, y, z, yaw, pitch, alive, sp, prot, sl);
   }
 }
 
@@ -349,14 +384,20 @@ function onRoster(m) {
 }
 
 function updateDeathWeapon() {
-  $('death-weapon').innerHTML = WEAPONS.map((w, i) =>
-    `<span class="${i === settings.weapon ? 'on' : ''}"><kbd>${i + 1}</kbd>${w.name}</span>`).join('');
+  $('death-weapon').innerHTML = CHARACTERS.map((ch, i) =>
+    `<span class="${i === settings.char ? 'on' : ''}"><kbd>${i + 1}</kbd>${ch.name}</span>`).join('');
+}
+
+let voteMaps = [], votes = [];
+function renderVotes() {
+  $('re-next').innerHTML = `<div class="vote-title">RÖSTA PÅ NÄSTA BANA</div><div class="votes">${voteMaps.map((name, i) => `
+    <div class="vote ${i === myVote ? 'mine' : ''}"><kbd>${i + 1}</kbd><b>${name}</b><span>${votes[i] ?? 0} röst${votes[i] === 1 ? '' : 'er'}</span></div>`).join('')}</div>`;
 }
 
 function onKill(m) {
   const k = roster.get(m.k), v = roster.get(m.v);
   const name = (p, id) => `<b style="color:${p?.color ?? '#fff'}">${esc(id === me.id ? 'DU' : p?.name ?? '?')}</b>`;
-  const wname = WEAPONS[m.w]?.name ?? '';
+  const wname = m.how === 'slam' ? 'MARKSTÖT' : WEAPONS[m.w]?.name ?? '';
   feed(`${name(k, m.k)} <span class="gun">${m.head ? '⌖ ' : ''}${wname}</span> ${name(v, m.v)}`);
   remotes.get(m.v)?.die();
 
@@ -463,20 +504,73 @@ function updateLocal(dt, now) {
   if (me.alive) {
     const f = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0);
     const s = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0);
-    me.sprint = !!(keys.ShiftLeft || keys.ShiftRight) && f > 0 && !ads && !firing && !gun.reloading;
-    const speed = (ads ? ADS_SPEED : me.sprint ? SPRINT : WALK) * W.speed;
+    me.sprint = !!(keys.ShiftLeft || keys.ShiftRight) && f > 0 && !ads && !firing && !gun.reloading && me.slideT <= 0;
+    const speed = (ads ? ADS_SPEED : me.sprint ? SPRINT : WALK) * C.speed;
     const sin = Math.sin(me.yaw), cos = Math.cos(me.yaw);
     let wx = -sin * f + cos * s, wz = -cos * f - sin * s;
     const len = Math.hypot(wx, wz);
     if (len > 0) { wx = (wx / len) * speed; wz = (wz / len) * speed; }
-    const k = Math.min(1, (me.ground ? 12 : 2.5) * dt);
+
+    me.slideT -= dt;
+    me.slideCd -= dt;
+    me.dashT -= dt;
+    // Under glidning och dash behåller du farten – annars styr du som vanligt.
+    // håller du hopp när du landar slipper du markfriktionen den rutan
+    const hopping = keys.Space && now - (me.landedAt ?? 0) < 120;
+    let accel = me.ground && !hopping ? 12 : 2.5;
+    if (me.slideT > 0) { accel = 0.9; wx *= 0.2; wz *= 0.2; }
+    if (me.dashT > 0) accel = 0;
+    const k = Math.min(1, accel * dt);
+    const before = Math.hypot(me.v[0], me.v[2]);
     me.v[0] += (wx - me.v[0]) * k;
     me.v[2] += (wz - me.v[2]) * k;
-    if (keys.Space && me.ground) { me.v[1] = PLAYER.JUMP; me.ground = false; sound.jump(); }
+    // I luften tappar du aldrig fart när du styr – det är det som gör bunny hop möjligt.
+    if (!me.ground && me.dashT <= 0) {
+      const after = Math.hypot(me.v[0], me.v[2]);
+      if (after > 0.01 && after < before && len > 0) {
+        me.v[0] *= before / after;
+        me.v[2] *= before / after;
+      }
+    }
+    if (keys.Space && me.ground) jumpQueued = true;
+    if (me.slideT > 0 && Math.hypot(me.v[0], me.v[2]) < 4) me.slideT = 0;
+
+    if (me.ground) me.airJumps = C.doubleJump ? 1 : 0;
+    if (jumpQueued) {
+      if (me.ground) {
+        me.v[1] = PLAYER.JUMP;
+        me.ground = false;
+        if (me.slideT > 0) { me.slideT = 0; me.v[0] *= 1.08; me.v[2] *= 1.08; }
+        // bunny hop: hoppar du direkt när du landar får du lite extra fart, upp till ett tak
+        if (now - me.landedAt < 120) {
+          const hs = Math.hypot(me.v[0], me.v[2]), cap = 13 * C.speed;
+          const boost = hs > 0.1 ? Math.min(hs * 1.07, Math.max(hs, cap)) / hs : 1;
+          me.v[0] *= boost;
+          me.v[2] *= boost;
+        }
+        sound.jump();
+      } else if (me.airJumps > 0) {
+        me.airJumps--;
+        me.v[1] = PLAYER.JUMP * 0.9;
+        if (len > 0) { me.v[0] = wx * 1.1; me.v[2] = wz * 1.1; }
+        effects.heal(new THREE.Vector3(me.p[0], me.p[1], me.p[2]));
+        sound.whoosh();
+      }
+    }
+    jumpQueued = false;
 
     const wasGround = me.ground, vy = me.v[1];
     moveBody(me, solids, dt);
-    if (me.ground && !wasGround && vy < -5) { sound.land(); weapon.land = 1; }
+    if (me.ground && !wasGround) {
+      me.landedAt = now;
+      if (me.slamArmed) {
+        me.slamArmed = false;
+        send({ t: 'ab' });
+        effects.shockwave(new THREE.Vector3(me.p[0], me.p[1], me.p[2]));
+        sound.slam();
+        shake = 1.5;
+      } else if (vy < -5) { sound.land(); weapon.land = 1; }
+    }
 
     const hs = Math.hypot(me.v[0], me.v[2]);
     if (me.ground && hs > 1) {
@@ -492,9 +586,9 @@ function updateLocal(dt, now) {
     me.pitch -= rec;
     gun.recoil -= rec;
 
-    const target = me.p[1] + PLAYER.EYE;
-    if (eyeY === null || !me.ground || target < eyeY) eyeY = target;
-    else eyeY += (target - eyeY) * Math.min(1, dt * 18);
+    const target = me.p[1] + (me.slideT > 0 ? 0.95 : PLAYER.EYE);
+    if (eyeY === null || (!me.ground && me.slideT <= 0)) eyeY = target;
+    else eyeY += (target - eyeY) * Math.min(1, dt * (target < eyeY ? 14 : 18));
   } else if (eyeY !== null) {
     eyeY += (me.p[1] + 0.5 - eyeY) * Math.min(1, dt * 3);
   }
@@ -549,8 +643,59 @@ function updateLocal(dt, now) {
 
   if (me.alive && now - lastSend > SEND_MS) {
     lastSend = now;
-    send({ t: 'st', p: me.p.map(r2), y: r3(me.yaw), x: r3(me.pitch), m: hs0 > 0.5 ? 1 : 0, sp: me.sp });
+    send({ t: 'st', p: me.p.map(r2), y: r3(me.yaw), x: r3(me.pitch), m: hs0 > 0.5 ? 1 : 0, s: me.slideT > 0 ? 1 : 0, sp: me.sp });
   }
+}
+
+function startSlide() {
+  if (!me.alive || !me.ground || me.slideCd > 0) return;
+  const hs = Math.hypot(me.v[0], me.v[2]);
+  if (hs < WALK * 0.8) return;
+  const boost = Math.max(hs, 11.5 * C.speed) / hs;
+  me.v[0] *= boost;
+  me.v[2] *= boost;
+  me.slideT = 0.75;
+  me.slideCd = 1.1;
+  sound.slide();
+}
+
+function useAbility() {
+  const now = performance.now();
+  if (!me.alive || roundOver || now < me.abilityReady) return;
+  const id = C.ability.id;
+  const fx = Math.sin(me.yaw), fz = Math.cos(me.yaw);
+
+  if (id === 'stim') {
+    if (me.hp >= me.maxHp) return;
+    send({ t: 'ab' });
+    sound.stim();
+  } else if (id === 'dash') {
+    const f = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0), s = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0);
+    let dx = -fx * f + fz * s, dz = -fz * f - fx * s;
+    const l = Math.hypot(dx, dz);
+    if (l === 0) { dx = -fx; dz = -fz; } else { dx /= l; dz /= l; }
+    me.v[0] = dx * 22;
+    me.v[2] = dz * 22;
+    me.v[1] = Math.max(me.v[1], 1.5);
+    me.dashT = 0.2;
+    sound.whoosh();
+  } else if (id === 'slam') {
+    if (me.ground) {
+      me.v[1] = 9;
+      me.v[0] = -fx * 9;
+      me.v[2] = -fz * 9;
+      me.ground = false;
+    } else {
+      me.v[1] = -22;
+    }
+    me.slamArmed = true;
+    sound.whoosh();
+  } else if (id === 'leap') {
+    me.v[1] = 13.5;
+    me.ground = false;
+    sound.whoosh();
+  }
+  me.abilityReady = now + C.ability.cooldown;
 }
 
 function menuCamera(dt) {
@@ -615,7 +760,7 @@ function renderScoreboard() {
     <tr class="${p.id === me.id ? 'me' : ''}">
       <td>${i + 1}</td>
       <td><span class="dot" style="background:${p.color}"></span>${esc(p.name)}</td>
-      <td class="muted">${WEAPONS[p.w]?.name ?? ''}</td>
+      <td class="muted">${CHARACTERS[p.c]?.name ?? ''}</td>
       <td>${p.k}</td><td>${p.d}</td><td>${(p.k / Math.max(1, p.d)).toFixed(2)}</td><td>${p.ping}</td>
     </tr>`).join('');
 }
@@ -640,13 +785,19 @@ function updateHud(now) {
   if (!playing) return;
   $('hp-num').textContent = me.hp;
   const bar = $('hp-bar');
-  bar.style.width = `${me.hp}%`;
-  bar.style.background = me.hp > 60 ? '#e9ecef' : me.hp > 30 ? '#ffb703' : '#ff4d6d';
+  const frac = me.hp / (me.maxHp || 100);
+  bar.style.width = `${frac * 100}%`;
+  bar.style.background = frac > 0.6 ? '#e9ecef' : frac > 0.3 ? '#ffb703' : '#ff4d6d';
+  const cd = Math.max(0, me.abilityReady - now);
+  $('ability-name').textContent = C.ability.name;
+  $('ability-cd').textContent = cd > 0 ? (cd / 1000).toFixed(1) : '';
+  $('ability').classList.toggle('ready', cd <= 0);
+  $('ability-fill').style.height = `${(1 - cd / C.ability.cooldown) * 100}%`;
   $('ammo-num').textContent = gun.ammo;
   $('ammo-num').classList.toggle('low', gun.ammo <= Math.ceil(W.mag / 4));
   $('weapon-name').textContent = W.name;
   $('reload-hint').textContent = gun.reloading ? 'LADDAR OM…' : gun.ammo <= Math.ceil(W.mag / 4) ? 'R – LADDA OM' : '';
-  $('vignette').style.opacity = me.alive && me.hp < 60 ? (1 - me.hp / 60) * 0.85 : 0;
+  $('vignette').style.opacity = me.alive && frac < 0.6 ? (1 - frac / 0.6) * 0.85 : 0;
   $('protect').classList.toggle('hidden', !(me.alive && me.protect));
   $('scope').classList.toggle('hidden', !scoped);
 
