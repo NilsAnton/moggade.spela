@@ -906,7 +906,7 @@ function addDummy(def, bot) {
 function toggleBots() {
   botsOn = !botsOn;
   if (botsOn) {
-    for (let i = 0; i < 3; i++) addDummy({ p: [-12 + i * 8, 0, -30] }, true);
+    for (let i = 0; i < 3; i++) addDummy({ p: [-12 + i * 8, 0, -5] }, true);
   } else {
     for (const d of dummies.filter((x) => x.bot)) d.r.dispose();
     for (let i = dummies.length - 1; i >= 0; i--) if (dummies[i].bot) dummies.splice(i, 1);
@@ -923,6 +923,7 @@ function damageDummy(r, amount, head) {
   if (!d || !r.alive) return;
   d.hp -= amount;
   stats.dmg += amount;
+  r.setInfo(`${d.bot ? 'BOT' : 'DOCKA'} ${Math.max(0, d.hp)}`, d.bot ? '#ff4d6d' : '#c9ced8');
   if (head) stats.heads++;
   const kill = d.hp <= 0;
   hitmarker(kill);
@@ -953,6 +954,7 @@ function updatePractice(dt, now) {
       if (now >= d.respawnAt) {
         d.hp = 100;
         d.sp++;
+        r.setInfo(d.bot ? 'BOT' : 'DOCKA', d.bot ? '#ff4d6d' : '#c9ced8');
         r.push(now, d.x, 0, d.z, Math.PI, 0, 1, d.sp, 1, 0);
       } else {
         r.push(now, d.x, 0, d.z, r.yaw, 0, 0, d.sp, 0, 0);
@@ -964,13 +966,17 @@ function updatePractice(dt, now) {
     let yaw = Math.PI;
     if (d.bot) {
       // vandra runt ute på banan och skjut mot spelaren
-      if (Math.hypot(d.tx - d.x, d.tz - d.z) < 0.5) { d.tx = -16 + Math.random() * 22; d.tz = -45 + Math.random() * 60; }
-      const dx = d.tx - d.x, dz = d.tz - d.z, l = Math.hypot(dx, dz) || 1;
-      d.x += (dx / l) * 4.5 * dt;
-      d.z += (dz / l) * 4.5 * dt;
+      if (Math.hypot(d.tx - d.x, d.tz - d.z) < 0.5) { d.tx = -16 + Math.random() * 22; d.tz = -30 + Math.random() * 50; }
+      // står still en stund när den skjuter, annars går den lugnt
+      if (now >= (d.standUntil ?? 0)) {
+        const dx = d.tx - d.x, dz = d.tz - d.z, l = Math.hypot(dx, dz) || 1;
+        d.x += (dx / l) * 2.2 * dt;
+        d.z += (dz / l) * 2.2 * dt;
+      }
       yaw = Math.atan2(-(me.p[0] - d.x), -(me.p[2] - d.z));
       if (me.alive && now >= d.nextShot) {
-        d.nextShot = now + 600 + Math.random() * 700;
+        d.nextShot = now + 1100 + Math.random() * 900;
+        d.standUntil = now + 700;
         botShoot(d, now);
       }
     } else if (d.def.move) {
