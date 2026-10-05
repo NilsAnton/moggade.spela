@@ -24,6 +24,21 @@ export const WEAPONS = [
     hip: 0.09, adsSpread: 0, moveSpread: 0.04, kick: 0.05, adsFov: 20, speed: 0.92, falloff: 0, scope: true,
     stats: { dmg: 1, rate: 0.1, range: 1, mobility: 0.35 },
   },
+  {
+    id: 'knife', name: 'KNIV', desc: 'Ett hugg räcker.',
+    auto: false, fireMs: 450, mag: Infinity, reloadMs: 0, body: 100, head: 100, pellets: 1, melee: true, range: 2.6,
+    hip: 0, adsSpread: 0, moveSpread: 0, kick: 0.01, adsFov: 75, speed: 1.1, falloff: 0,
+    stats: { dmg: 1, rate: 0.4, range: 0, mobility: 1 },
+  },
+];
+
+// Gun Game: vapen i ordning och hur många kills varje nivå kräver.
+export const GUNGAME = [
+  { w: 0, kills: 2 },
+  { w: 1, kills: 2 },
+  { w: 2, kills: 2 },
+  { w: 3, kills: 2 },
+  { w: 4, kills: 1 },
 ];
 
 export function damageAt(w, head, dist) {

@@ -60,7 +60,7 @@
   </div>
 
   <div id="scoreboard" class="hidden">
-    <div class="sb-head"><span>FREE FOR ALL</span><span id="sb-limit"></span></div>
+    <div class="sb-head"><span id="sb-mode">FREE FOR ALL</span><span id="sb-limit"></span></div>
     <table>
       <thead><tr><th>#</th><th>Spelare</th><th>Gubbe</th><th>Kills</th><th>Döda</th><th>K/D</th><th>Ping</th></tr></thead>
       <tbody id="sb-body"></tbody>
@@ -87,7 +87,8 @@
         <span>Volym</span>
         <input type="range" id="vol" min="0" max="1" step="0.05">
       </label>
-      <button id="play">SPELA ONLINE</button>
+      <button id="play">FREE FOR ALL</button>
+      <button id="play-gg">GUN GAME</button>
       <button id="practice">ÖVNING</button>
       <div id="status"></div>
       <div id="weapon-note"></div>

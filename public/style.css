@@ -249,7 +249,8 @@ tr.me td { background: rgba(25, 227, 255, 0.1); }
 .dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 10px; }
 
 /* ---------- vapen ---------- */
-#menu { gap: 48px; }
+#menu { gap: 48px; overflow-y: auto; align-items: flex-start; padding-top: 24px; padding-bottom: 24px; }
+#menu .panel { margin: auto 0; }
 .weapons-panel { width: min(340px, 100%); }
 #weapons { display: flex; flex-direction: column; gap: 10px; }
 .weapon-card {
@@ -341,6 +342,21 @@ td.muted { color: var(--muted); font-size: 13px; }
 .vote.mine { border-color: var(--accent); background: rgba(25, 227, 255, 0.1); }
 .vote b { display: block; margin: 6px 0 2px; font-size: 18px; letter-spacing: 3px; }
 .vote span { font-size: 12px; color: var(--muted); }
+
+#play-gg {
+  width: 100%;
+  margin-top: 10px;
+  padding: 14px;
+  font: 700 20px 'Chakra Petch', sans-serif;
+  letter-spacing: 6px;
+  color: #fff;
+  background: linear-gradient(90deg, #ff2bd6, #ff6a3d);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  box-shadow: 0 0 24px rgba(255, 43, 214, 0.3);
+}
+#play-gg:hover { transform: translateY(-1px); }
 
 /* ---------- övningsläge ---------- */
 #practice {

@@ -5,7 +5,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { PLAYER, makeSolids, moveBody, raycastWorld, rayBox, hitboxes } from './physics.js';
 import { MAPS, RANGE } from './maps.js';
-import { WEAPONS, damageAt } from './weapons.js';
+import { WEAPONS, GUNGAME, damageAt } from './weapons.js';
 import { CHARACTERS, SLAM, STIM_HP } from './characters.js';
 import { buildWorld } from './world.js';
 import { Effects } from './effects.js';
@@ -87,7 +87,7 @@ const me = {
 };
 let C = CHARACTERS[settings.char];
 let W = WEAPONS[C.weapon];
-let jumpQueued = false, myVote = -1;
+let jumpQueued = false, myVote = -1, myLevel = 0;
 const gun = { ammo: W.mag, lastShot: 0, reloading: false, reloadStart: 0, reloadEnd: 0, bloom: 0, recoil: 0, trigger: true };
 const remotes = new Map();
 const roster = new Map();
@@ -150,13 +150,16 @@ function selectChar(i) {
 $('sens').oninput = (e) => { settings.sens = Number(e.target.value); sensLabel(); saveSettings(); };
 $('vol').oninput = (e) => { settings.vol = Number(e.target.value); sound.setVolume(settings.vol); saveSettings(); };
 
-$('play').onclick = () => {
+let mode = 'ffa';
+function playOnline(m) {
   sound.init();
   settings.name = $('name').value.trim().slice(0, 16);
   saveSettings();
-  if (!ws && !practice) connect();
+  if (!ws && !practice) { mode = m; connect(); }
   lockPointer();
-};
+}
+$('play').onclick = () => playOnline(ws ? mode : 'ffa');
+$('play-gg').onclick = () => playOnline('gungame');
 
 $('practice').onclick = () => {
   sound.init();
@@ -177,7 +180,9 @@ function showMenu(show) {
   $('menu').classList.toggle('hidden', !show);
   $('hud').classList.toggle('hidden', show || !playing);
   $('hud').classList.toggle('practice', practice);
-  $('play').textContent = playing ? 'FORTSÄTT' : 'SPELA ONLINE';
+  $('play').textContent = playing ? 'FORTSÄTT' : 'FREE FOR ALL';
+  $('play').classList.toggle('hidden', practice);
+  $('play-gg').classList.toggle('hidden', playing);
   $('practice').textContent = practice ? 'AVSLUTA ÖVNING' : 'ÖVNING';
   $('practice').classList.toggle('hidden', playing && !practice);
   $('name').disabled = playing;
@@ -240,7 +245,7 @@ document.addEventListener('pointerlockchange', () => {
 function connect() {
   $('status').textContent = 'Ansluter…';
   ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
-  ws.onopen = () => send({ t: 'join', name: settings.name, color: settings.color, c: settings.char });
+  ws.onopen = () => send({ t: 'join', mode, name: settings.name, color: settings.color, c: settings.char });
   ws.onmessage = (e) => onMessage(JSON.parse(e.data));
   ws.onclose = () => {
     ws = null;
@@ -275,8 +280,9 @@ function onMessage(m) {
       break;
     case 'spawn':
       C = CHARACTERS[m.c] ?? CHARACTERS[0];
-      W = WEAPONS[C.weapon];
+      W = WEAPONS[m.w ?? C.weapon];
       weapon.setType(W.id);
+      myLevel = m.lvl ?? 0;
       me.maxHp = m.hp;
       me.slideT = me.dashT = 0;
       me.slamArmed = false;
@@ -308,6 +314,10 @@ function onMessage(m) {
         const to = new THREE.Vector3(...e);
         effects.tracer(from, to);
         if (!m.hit) effects.sparksAt(to);
+      }
+      if (WEAPONS[m.w]?.melee) {
+        if (camera.position.distanceTo(from) < 15) sound.whoosh();
+        break;
       }
       effects.flash(from);
       sound.shoot(Math.max(0.1, camera.position.distanceTo(from)), panFor(from), WEAPONS[m.w]?.id);
@@ -352,6 +362,20 @@ function onMessage(m) {
       centerMsg(MAPS[m.map].name, 'NY RUNDA');
       break;
     case 'votes': votes = m.v; renderVotes(); break;
+    case 'level':
+      myLevel = m.lvl;
+      if (m.down) {
+        centerMsg('KNIVAD!', `Ner till nivå ${m.lvl + 1}`);
+        break;
+      }
+      W = WEAPONS[m.w];
+      weapon.setType(W.id);
+      gun.ammo = W.mag;
+      gun.reloading = false;
+      centerMsg(`NIVÅ ${m.lvl + 1}`, W.name);
+      sound.stim();
+      renderTopbar();
+      break;
     case 'fx': {
       if (m.k === 'slam') {
         const p = new THREE.Vector3(...m.p);
@@ -420,7 +444,7 @@ function renderVotes() {
 function onKill(m) {
   const k = roster.get(m.k), v = roster.get(m.v);
   const name = (p, id) => `<b style="color:${p?.color ?? '#fff'}">${esc(id === me.id ? 'DU' : p?.name ?? '?')}</b>`;
-  const wname = m.how === 'slam' ? 'MARKSTÖT' : WEAPONS[m.w]?.name ?? '';
+  const wname = m.how === 'slam' ? 'MARKSTÖT' : m.how === 'knife' ? 'KNIV' : WEAPONS[m.w]?.name ?? '';
   feed(`${name(k, m.k)} <span class="gun">${m.head ? '⌖ ' : ''}${wname}</span> ${name(v, m.v)}`);
   remotes.get(m.v)?.die();
 
@@ -490,8 +514,8 @@ function tryFire(now) {
     dirs.push(da.map((v) => Math.round(v * 10000) / 10000));
 
     // Lokal träffberäkning bara för effekter – servern bestämmer skadan.
-    let best = 300, normal = null, hitPlayer = null, hitHead = false;
-    const w = raycastWorld(solids, o, da, 300);
+    let best = W.melee ? W.range : 300, normal = null, hitPlayer = null, hitHead = false;
+    const w = raycastWorld(solids, o, da, best);
     if (w) { best = w.t; normal = w.n; }
     for (const rp of targets) {
       if (!rp.alive) continue;
@@ -508,7 +532,7 @@ function tryFire(now) {
       practiceHits.set(hitPlayer, cur);
     }
     const end = new THREE.Vector3(o[0] + da[0] * best, o[1] + da[1] * best, o[2] + da[2] * best);
-    if (!scoped) effects.tracer(_muzzle, end);
+    if (!scoped && !W.melee) effects.tracer(_muzzle, end);
     if (hitPlayer) effects.blood(end, d);
     else if (normal) effects.impact(end, new THREE.Vector3(...normal));
   }
@@ -516,7 +540,7 @@ function tryFire(now) {
   weapon.fire();
   flashLight.intensity = 25;
   flashT = 0.05;
-  sound.shoot(0, 0, W.id);
+  if (W.melee) sound.whoosh(); else sound.shoot(0, 0, W.id);
 
   const kick = W.kick * (ads ? 0.6 : 1);
   me.pitch = Math.min(1.55, me.pitch + kick);
@@ -791,17 +815,23 @@ function centerMsg(title, sub) {
   centerTimer = setTimeout(() => el.classList.remove('show'), 1800);
 }
 
+const gg = () => mode === 'gungame' && !practice;
+const levelName = (lvl) => `${lvl + 1}/${GUNGAME.length} ${WEAPONS[GUNGAME[lvl]?.w]?.name ?? ''}`;
+
 function sortedRoster() {
-  return [...roster.values()].sort((a, b) => b.k - a.k || a.d - b.d);
+  return [...roster.values()].sort((a, b) => (gg() ? b.lvl - a.lvl : 0) || b.k - a.k || a.d - b.d);
 }
 
 function renderScoreboard() {
-  $('sb-limit').textContent = `${MAPS[mapIndex]?.name ?? ''} · först till ${killLimit} kills`;
+  $('sb-mode').textContent = gg() ? 'GUN GAME' : 'FREE FOR ALL';
+  $('sb-limit').textContent = gg()
+    ? `${MAPS[mapIndex]?.name ?? ''} · första kniv-kill vinner`
+    : `${MAPS[mapIndex]?.name ?? ''} · först till ${killLimit} kills`;
   $('sb-body').innerHTML = sortedRoster().map((p, i) => `
     <tr class="${p.id === me.id ? 'me' : ''}">
       <td>${i + 1}</td>
       <td><span class="dot" style="background:${p.color}"></span>${esc(p.name)}</td>
-      <td class="muted">${CHARACTERS[p.c]?.name ?? ''}</td>
+      <td class="muted">${gg() ? levelName(p.lvl) : CHARACTERS[p.c]?.name ?? ''}</td>
       <td>${p.k}</td><td>${p.d}</td><td>${(p.k / Math.max(1, p.d)).toFixed(2)}</td><td>${p.ping}</td>
     </tr>`).join('');
 }
@@ -811,9 +841,16 @@ function renderTopbar() {
   const mine = roster.get(me.id);
   const rank = list.findIndex((p) => p.id === me.id) + 1;
   const leader = list[0];
-  $('my-score').innerHTML = mine ? `<b>${mine.k}</b><span>/ ${killLimit}</span><small>PLATS ${rank} AV ${list.length}</small>` : '';
+  if (gg()) {
+    const next = GUNGAME[myLevel + 1];
+    $('my-score').innerHTML = mine
+      ? `<b>NIVÅ ${myLevel + 1}</b><span>/ ${GUNGAME.length}</span><small>${next ? `NÄSTA: ${WEAPONS[next.w].name}` : 'KNIV-KILL VINNER!'} · PLATS ${rank}</small>`
+      : '';
+  } else {
+    $('my-score').innerHTML = mine ? `<b>${mine.k}</b><span>/ ${killLimit}</span><small>PLATS ${rank} AV ${list.length}</small>` : '';
+  }
   $('leader').innerHTML = leader && leader.id !== me.id
-    ? `LEDARE <b style="color:${leader.color}">${esc(leader.name)}</b> ${leader.k}`
+    ? `LEDARE <b style="color:${leader.color}">${esc(leader.name)}</b> ${gg() ? `nivå ${leader.lvl + 1}` : leader.k}`
     : list.length > 1 ? '<b>DU LEDER</b>' : '';
   $('ping').textContent = mine ? `${mine.ping} ms` : '';
 }
@@ -834,10 +871,11 @@ function updateHud(now) {
   $('ability-cd').textContent = cd > 0 ? (cd / 1000).toFixed(1) : '';
   $('ability').classList.toggle('ready', cd <= 0);
   $('ability-fill').style.height = `${(1 - cd / C.ability.cooldown) * 100}%`;
-  $('ammo-num').textContent = gun.ammo;
-  $('ammo-num').classList.toggle('low', gun.ammo <= Math.ceil(W.mag / 4));
+  $('ammo-num').textContent = W.melee ? '—' : gun.ammo;
+  const lowAmmo = !W.melee && gun.ammo <= Math.ceil(W.mag / 4);
+  $('ammo-num').classList.toggle('low', lowAmmo);
   $('weapon-name').textContent = W.name;
-  $('reload-hint').textContent = gun.reloading ? 'LADDAR OM…' : gun.ammo <= Math.ceil(W.mag / 4) ? 'R – LADDA OM' : '';
+  $('reload-hint').textContent = gun.reloading ? 'LADDAR OM…' : lowAmmo ? 'R – LADDA OM' : '';
   $('vignette').style.opacity = me.alive && frac < 0.6 ? (1 - frac / 0.6) * 0.85 : 0;
   $('protect').classList.toggle('hidden', !(me.alive && me.protect));
   $('scope').classList.toggle('hidden', !scoped);

@@ -77,7 +77,7 @@ export class RemotePlayer {
   }
 
   setWeapon(w) {
-    const len = [1, 0.7, 0.9, 1.4][w] ?? 1;
+    const len = [1, 0.7, 0.9, 1.4, 0.35][w] ?? 1;
     this.gun.scale.z = len;
     this.gun.position.z = -0.1 - 0.3 * len;
     this.muzzle.position.z = -0.12 - 0.62 * len;

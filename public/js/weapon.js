@@ -63,6 +63,15 @@ const MODELS = {
       [0.02, 0.025, 0.02, 'metal', 0, 0.055, -0.02],
     ],
   },
+  knife: {
+    sightY: 0, muzzle: -0.35,
+    parts: [
+      [0.035, 0.05, 0.14, 'poly', 0, 0, 0.02],
+      [0.08, 0.015, 0.02, 'metal', 0, 0, -0.06],
+      [0.008, 0.045, 0.24, 'metal', 0, 0.005, -0.19],
+      [0.009, 0.006, 0.2, 'accent', 0, 0.03, -0.17],
+    ],
+  },
   sniper: {
     sightY: 0.1, muzzle: -0.86,
     parts: [
@@ -155,7 +164,8 @@ export class Weapon {
     this.model.add(this.muzzle);
     this.root.add(this.model);
     this.adsPos.set(0, -spec.sightY * 0.4, -0.11);
-    this.kickPower = type === 'shotgun' || type === 'sniper' ? 2.2 : type === 'smg' ? 0.7 : 1;
+    if (type === 'knife') this.adsPos.copy(this.hip);
+    this.kickPower = type === 'shotgun' || type === 'sniper' ? 2.2 : type === 'smg' ? 0.7 : type === 'knife' ? 3 : 1;
     this.swap = 1;
   }
 
@@ -166,6 +176,7 @@ export class Weapon {
 
   fire() {
     this.kick = this.kickPower;
+    if (this.type === 'knife') return;
     this.flashT = 0.045;
     this.flash.visible = true;
     this.flash.material.rotation = Math.random() * Math.PI * 2;
@@ -205,6 +216,14 @@ export class Weapon {
     rot.x = this.kick * 0.06 * (1 - a * 0.6) - this.sprintK * 0.3 - r * 0.35 + this.swayY * 0.6 - this.swap * 0.6;
     rot.y = this.sprintK * 0.7 + this.swayX * 0.8;
     rot.z = r * 0.5 + Math.sin(s.bob) * 0.01 * bob;
+    if (this.type === 'knife') {
+      // hugg framåt och snett över
+      const st = Math.min(this.kick, 1);
+      p.z -= st * 0.06;
+      p.x -= st * 0.04;
+      rot.y -= st * 0.6;
+      rot.x -= st * 0.3;
+    }
 
     this.flashT -= dt;
     if (this.flashT <= 0) this.flash.visible = false;
