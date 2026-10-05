@@ -1,0 +1,23 @@
+services:
+  game:
+    build: .
+    image: moggade:latest
+    container_name: moggade-game
+    restart: unless-stopped
+    environment:
+      - PORT=3000
+      - KILL_LIMIT=${KILL_LIMIT:-25}
+      - MAX_PLAYERS=${MAX_PLAYERS:-16}
+    ports:
+      # Bara för att testa på hemnätverket (http://NAS-IP:3000). Kan tas bort om du bara vill köra via tunneln.
+      - "${GAME_PORT:-3000}:3000"
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: moggade-tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
+    depends_on:
+      - game
