@@ -7,6 +7,7 @@ import { MAPS } from '../public/js/maps.js';
 import { WEAPONS, GUNGAME, damageAt } from '../public/js/weapons.js';
 import { CHARACTERS, SLAM, STIM_HP } from '../public/js/characters.js';
 import { makeSolids, rayBox, hitboxes, PLAYER } from '../public/js/physics.js';
+import { BOT_NAMES, newBrain, botSpawned, botThink } from './bots.js';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.PORT) || 3000;
@@ -21,6 +22,7 @@ const RANGE = 300;
 const INTERP_MS = 100;
 const HISTORY_MS = 1000;
 const ROUND_PAUSE_MS = 10000;
+const BOT_COUNT = Number(process.env.BOTS ?? 3);
 const COLORS = ['#ff4d6d', '#ffb703', '#4cc9f0', '#80ed99', '#c77dff', '#ff8fab', '#f77f00', '#e9ecef'];
 
 // ---------- hjälpfunktioner ----------
@@ -73,8 +75,8 @@ class Room {
       t: 'roster',
       killLimit: KILL_LIMIT,
       list: [...this.players.values()].map((p) => ({
-        id: p.id, name: p.name, color: p.color, k: p.kills, d: p.deaths, ping: Math.round(p.rtt),
-        w: p.weapon, c: p.char, lvl: p.level,
+        id: p.id, name: p.name, color: p.color, k: p.kills, d: p.deaths, ping: p.bot ? 0 : Math.round(p.rtt),
+        w: p.weapon, c: p.char, lvl: p.level, bot: p.bot ? 1 : 0,
       })),
     });
   }
@@ -112,6 +114,36 @@ class Room {
     this.sendRoster();
     this.broadcast({ t: 'msg', text: `${p.name} anslöt` }, p);
     return p;
+  }
+
+  // Är du ensam i rummet fylls det på med bottar; kommer det fler människor försvinner de.
+  manageBots() {
+    const all = [...this.players.values()];
+    const humans = all.filter((p) => !p.bot).length;
+    const bots = all.filter((p) => p.bot);
+    const want = humans === 1 ? BOT_COUNT : 0;
+    if (bots.length < want) this.addBot(bots.length);
+    else if (bots.length > want) this.leave(bots[bots.length - 1]);
+  }
+
+  addBot(n) {
+    const id = nextId++;
+    const ch = Math.floor(Math.random() * CHARACTERS.length);
+    const p = {
+      id, ws: { readyState: 0, send() {} }, bot: newBrain(),
+      name: `BOT ${BOT_NAMES[(id + n) % BOT_NAMES.length]}`,
+      color: COLORS[(id * 3) % COLORS.length],
+      char: ch, nextChar: ch, weapon: 0, maxHp: CHARACTERS[ch].hp, level: 0, levelKills: 0,
+      lastAbility: 0, sl: 0, vote: -1,
+      x: 0, y: 0, z: 0, yaw: 0, pitch: 0, mv: 0,
+      hp: 0, alive: false, sp: 0, kills: 0, deaths: 0, streak: 0,
+      // negativ rtt => lag-kompensationen spolar inte tillbaka för bottar
+      lastShot: 0, rtt: -2 * INTERP_MS, respawnAt: 0, protectUntil: 0, hist: [],
+    };
+    p.weapon = this.weaponFor(p);
+    this.players.set(id, p);
+    if (!this.roundEndsAt) this.spawn(p);
+    this.sendRoster();
   }
 
   leave(p) {
@@ -159,6 +191,7 @@ class Room {
     p.streak = 0;
     p.protectUntil = Date.now() + PROTECT_MS;
     p.hist = [];
+    if (p.bot) botSpawned(p);
     send(p, { t: 'spawn', p: best, yaw: r3(p.yaw), sp: p.sp, c: p.char, hp: p.maxHp, w: p.weapon, lvl: p.level });
   }
 
@@ -355,16 +388,23 @@ class Room {
 
   tick() {
     const now = Date.now();
-    if (!this.players.size) { this.roundStartedAt = now; return; }
+    if (![...this.players.values()].some((p) => !p.bot)) {
+      for (const p of [...this.players.values()]) this.leave(p);
+      this.roundStartedAt = now;
+      return;
+    }
 
     if (this.roundEndsAt && now >= this.roundEndsAt) this.startRound();
     if (!this.roundEndsAt && this.roundLeft() <= 0) this.endRound(this.leader());
+
+    if (now >= (this.nextBotCheck ?? 0)) { this.nextBotCheck = now + 1000; this.manageBots(); }
 
     for (const p of this.players.values()) {
       if (!p.alive) {
         if (!this.roundEndsAt && now >= p.respawnAt) this.spawn(p);
         continue;
       }
+      if (p.bot) botThink(this, p, now, TICK_MS / 1000);
       p.hist.push({ t: now, x: p.x, y: p.y, z: p.z, sl: p.sl });
       while (p.hist.length && now - p.hist[0].t > HISTORY_MS) p.hist.shift();
     }
