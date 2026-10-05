@@ -4,9 +4,9 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { PLAYER, makeSolids, moveBody, raycastWorld, rayBox, hitboxes } from './physics.js';
-import { MAPS } from './maps.js';
-import { WEAPONS } from './weapons.js';
-import { CHARACTERS } from './characters.js';
+import { MAPS, RANGE } from './maps.js';
+import { WEAPONS, damageAt } from './weapons.js';
+import { CHARACTERS, SLAM, STIM_HP } from './characters.js';
 import { buildWorld } from './world.js';
 import { Effects } from './effects.js';
 import { Sound } from './audio.js';
@@ -64,8 +64,9 @@ function loadMap(i) {
   if (i === mapIndex) return;
   disposeWorld?.();
   mapIndex = i;
-  disposeWorld = buildWorld(scene, renderer, MAPS[i]);
-  solids = makeSolids(MAPS[i].boxes);
+  const def = i === 'range' ? RANGE : MAPS[i];
+  disposeWorld = buildWorld(scene, renderer, def);
+  solids = makeSolids(def.boxes);
 }
 loadMap(0);
 
@@ -134,7 +135,9 @@ function selectChar(i) {
   settings.char = i;
   saveSettings();
   document.querySelectorAll('.weapon-card').forEach((c, j) => c.classList.toggle('active', j === i));
-  if (playing) {
+  if (practice) {
+    practiceSpawn(true);
+  } else if (playing) {
     send({ t: 'loadout', c: i });
     $('weapon-note').textContent = me.alive ? `${CHARACTERS[i].name} – byts när du spawnar nästa gång` : '';
   } else {
@@ -151,17 +154,32 @@ $('play').onclick = () => {
   sound.init();
   settings.name = $('name').value.trim().slice(0, 16);
   saveSettings();
-  if (!ws) connect();
+  if (!ws && !practice) connect();
+  lockPointer();
+};
+
+$('practice').onclick = () => {
+  sound.init();
+  if (practice) { stopPractice(); return; }
+  if (ws) return;
+  startPractice();
+  lockPointer();
+};
+
+function lockPointer() {
   try {
     const p = renderer.domElement.requestPointerLock();
     if (p && p.catch) p.catch(() => { $('status').textContent = 'Klicka igen för att låsa musen'; });
   } catch {}
-};
+}
 
 function showMenu(show) {
   $('menu').classList.toggle('hidden', !show);
   $('hud').classList.toggle('hidden', show || !playing);
-  $('play').textContent = playing ? 'FORTSÄTT' : 'SPELA';
+  $('hud').classList.toggle('practice', practice);
+  $('play').textContent = playing ? 'FORTSÄTT' : 'SPELA ONLINE';
+  $('practice').textContent = practice ? 'AVSLUTA ÖVNING' : 'ÖVNING';
+  $('practice').classList.toggle('hidden', playing && !practice);
   $('name').disabled = playing;
   $('colors').classList.toggle('locked', playing);
   if (!show) $('weapon-note').textContent = '';
@@ -177,6 +195,11 @@ addEventListener('keydown', (e) => {
   keys[e.code] = true;
   if (e.code === 'KeyR') startReload();
   const n = Number(e.key) - 1;
+  if (practice) {
+    if (CHARACTERS[n]) { selectChar(n); return; }
+    if (e.code === 'KeyB') toggleBots();
+    if (e.code === 'KeyT') resetStats();
+  }
   if (roundOver && MAPS[n]) { myVote = n; send({ t: 'vote', m: n }); renderVotes(); return; }
   // 1–4 byter gubbe när du är död
   if (!me.alive && CHARACTERS[n]) { selectChar(n); updateDeathWeapon(); }
@@ -457,6 +480,8 @@ function tryFire(now) {
   const spread = currentSpread();
   weapon.muzzleWorld(_muzzle);
   const dirs = [];
+  const targets = practice ? dummies.map((dm) => dm.r) : [...remotes.values()];
+  const practiceHits = new Map();
 
   for (let i = 0; i < W.pellets; i++) {
     const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * spread;
@@ -465,16 +490,22 @@ function tryFire(now) {
     dirs.push(da.map((v) => Math.round(v * 10000) / 10000));
 
     // Lokal träffberäkning bara för effekter – servern bestämmer skadan.
-    let best = 300, normal = null, hitPlayer = false;
+    let best = 300, normal = null, hitPlayer = null, hitHead = false;
     const w = raycastWorld(solids, o, da, 300);
     if (w) { best = w.t; normal = w.n; }
-    for (const rp of remotes.values()) {
+    for (const rp of targets) {
       if (!rp.alive) continue;
       const hb = hitboxes(rp.pos.x, rp.pos.y, rp.pos.z);
       for (const box of [hb.head, hb.body]) {
         const h = rayBox(o, da, box.min, box.max);
-        if (h && h.t < best) { best = h.t; hitPlayer = true; }
+        if (h && h.t < best) { best = h.t; hitPlayer = rp; hitHead = box === hb.head; }
       }
+    }
+    if (practice && hitPlayer) {
+      const cur = practiceHits.get(hitPlayer) ?? { amount: 0, head: false };
+      cur.amount += damageAt(W, hitHead, best);
+      cur.head ||= hitHead;
+      practiceHits.set(hitPlayer, cur);
     }
     const end = new THREE.Vector3(o[0] + da[0] * best, o[1] + da[1] * best, o[2] + da[2] * best);
     if (!scoped) effects.tracer(_muzzle, end);
@@ -493,6 +524,11 @@ function tryFire(now) {
   gun.recoil += kick * 0.75;
   gun.bloom = Math.min(0.035, gun.bloom + W.hip * 0.35);
 
+  if (practice) {
+    stats.shots++;
+    if (practiceHits.size) stats.hits++;
+    for (const [r, { amount, head }] of practiceHits) damageDummy(r, amount, head);
+  }
   send({ t: 'sh', o: o.map(r3), d: W.pellets > 1 ? dirs : dirs[0] });
   if (W.id === 'sniper') setTimeout(() => { if (me.alive && gun.ammo > 0) sound.bolt(); }, 350);
 }
@@ -565,6 +601,7 @@ function updateLocal(dt, now) {
       me.landedAt = now;
       if (me.slamArmed) {
         me.slamArmed = false;
+        if (practice) practiceSlam();
         send({ t: 'ab' });
         effects.shockwave(new THREE.Vector3(me.p[0], me.p[1], me.p[2]));
         sound.slam();
@@ -667,6 +704,10 @@ function useAbility() {
 
   if (id === 'stim') {
     if (me.hp >= me.maxHp) return;
+    if (practice) {
+      me.hp = Math.min(me.maxHp, me.hp + STIM_HP);
+      effects.heal(new THREE.Vector3(me.p[0], me.p[1] + 1, me.p[2]));
+    }
     send({ t: 'ab' });
     sound.stim();
   } else if (id === 'dash') {
@@ -817,12 +858,184 @@ function updateHud(now) {
   }
 }
 
+// ---------- övningsläge (körs helt lokalt) ----------
+let practice = false, botsOn = false;
+const dummies = [];
+const stats = { shots: 0, hits: 0, heads: 0, kills: 0, dmg: 0 };
+
+function startPractice() {
+  practice = true;
+  playing = true;
+  roundOver = false;
+  me.id = 0;
+  loadMap('range');
+  for (const def of RANGE.dummies) addDummy(def, false);
+  resetStats();
+  practiceSpawn(false);
+  showMenu(!locked);
+}
+
+function stopPractice() {
+  practice = false;
+  playing = false;
+  botsOn = false;
+  me.alive = false;
+  for (const d of dummies) d.r.dispose();
+  dummies.length = 0;
+  $('death').classList.add('hidden');
+  loadMap(0);
+  showMenu(true);
+}
+
+function practiceSpawn(keepPosition) {
+  const p = keepPosition && me.alive ? [...me.p] : [...RANGE.spawns[0]];
+  const yaw = keepPosition && me.alive ? me.yaw : 0;
+  onMessage({ t: 'spawn', p, yaw, sp: me.sp + 1, c: settings.char, hp: CHARACTERS[settings.char].hp });
+}
+
+function addDummy(def, bot) {
+  const r = new RemotePlayer(scene);
+  r.setInfo(bot ? 'BOT' : 'DOCKA', bot ? '#ff4d6d' : '#c9ced8');
+  r.setWeapon(bot ? 0 : 1);
+  const d = { def, r, bot, hp: 100, respawnAt: 0, x: def.p[0], z: def.p[2], tx: def.p[0], tz: def.p[2], nextShot: 0, sp: 1 };
+  r.push(performance.now(), d.x, 0, d.z, Math.PI, 0, 1, d.sp, 0, 0);
+  dummies.push(d);
+  return d;
+}
+
+function toggleBots() {
+  botsOn = !botsOn;
+  if (botsOn) {
+    for (let i = 0; i < 3; i++) addDummy({ p: [-12 + i * 8, 0, -30] }, true);
+  } else {
+    for (const d of dummies.filter((x) => x.bot)) d.r.dispose();
+    for (let i = dummies.length - 1; i >= 0; i--) if (dummies[i].bot) dummies.splice(i, 1);
+  }
+  centerMsg(botsOn ? 'BOTTAR PÅ' : 'BOTTAR AV', botsOn ? 'De skjuter tillbaka!' : '');
+}
+
+function resetStats() {
+  Object.assign(stats, { shots: 0, hits: 0, heads: 0, kills: 0, dmg: 0 });
+}
+
+function damageDummy(r, amount, head) {
+  const d = dummies.find((x) => x.r === r);
+  if (!d || !r.alive) return;
+  d.hp -= amount;
+  stats.dmg += amount;
+  if (head) stats.heads++;
+  const kill = d.hp <= 0;
+  hitmarker(kill);
+  if (head) sound.headshot(); else sound.hit();
+  if (kill) {
+    sound.kill();
+    stats.kills++;
+    r.die();
+    d.respawnAt = performance.now() + 1500;
+  }
+}
+
+function practiceSlam() {
+  for (const d of dummies) {
+    if (!d.r.alive) continue;
+    const dist = Math.hypot(d.r.pos.x - me.p[0], d.r.pos.z - me.p[2]);
+    if (dist <= SLAM.radius) damageDummy(d.r, Math.round(SLAM.damage * (1 - (dist / SLAM.radius) * 0.5)), false);
+  }
+}
+
+const _botEye = new THREE.Vector3();
+function updatePractice(dt, now) {
+  if (!me.alive && now - deathAt > 3000) practiceSpawn(false);
+
+  for (const d of dummies) {
+    const r = d.r;
+    if (!r.alive) {
+      if (now >= d.respawnAt) {
+        d.hp = 100;
+        d.sp++;
+        r.push(now, d.x, 0, d.z, Math.PI, 0, 1, d.sp, 1, 0);
+      } else {
+        r.push(now, d.x, 0, d.z, r.yaw, 0, 0, d.sp, 0, 0);
+      }
+      r.update(now, dt);
+      continue;
+    }
+
+    let yaw = Math.PI;
+    if (d.bot) {
+      // vandra runt ute på banan och skjut mot spelaren
+      if (Math.hypot(d.tx - d.x, d.tz - d.z) < 0.5) { d.tx = -16 + Math.random() * 22; d.tz = -45 + Math.random() * 60; }
+      const dx = d.tx - d.x, dz = d.tz - d.z, l = Math.hypot(dx, dz) || 1;
+      d.x += (dx / l) * 4.5 * dt;
+      d.z += (dz / l) * 4.5 * dt;
+      yaw = Math.atan2(-(me.p[0] - d.x), -(me.p[2] - d.z));
+      if (me.alive && now >= d.nextShot) {
+        d.nextShot = now + 600 + Math.random() * 700;
+        botShoot(d, now);
+      }
+    } else if (d.def.move) {
+      const t = (now / 1000) * d.def.speed / d.def.move;
+      const k = d.def.strafe ? Math.sin(t * 2.3) * 0.6 + Math.sin(t * 5.1) * 0.4 : Math.sin(t);
+      d.x = d.def.p[0] + k * d.def.move;
+    }
+    r.push(now, d.x, 0, d.z, yaw, 0, 1, d.sp, 0, 0);
+    r.update(now, dt);
+  }
+}
+
+function botShoot(d, now) {
+  const from = d.r.muzzlePos(_botEye);
+  const eye = [d.x, PLAYER.EYE, d.z];
+  const tx = me.p[0], ty = me.p[1] + 1.2, tz = me.p[2];
+  const dir = [tx - eye[0], ty - eye[1], tz - eye[2]];
+  const dist = Math.hypot(...dir);
+  const nd = dir.map((v) => v / dist);
+  const wall = raycastWorld(solids, eye, nd, dist);
+  if (wall) return; // ser dig inte
+  const hit = Math.random() < 0.33;
+  const miss = hit ? [0, 0, 0] : [(Math.random() - 0.5) * 3, (Math.random() - 0.5) * 2, (Math.random() - 0.5) * 3];
+  const end = new THREE.Vector3(tx + miss[0], ty + miss[1], tz + miss[2]);
+  effects.tracer(from.clone(), end);
+  effects.flash(from.clone());
+  sound.shoot(dist, panFor(from), 'rifle');
+  if (!hit || now < (me.protectUntil ?? 0)) return;
+  me.hp = Math.max(0, me.hp - 12);
+  onMessage({ t: 'hurt', hp: me.hp, from: [d.x, d.z] });
+  if (me.hp <= 0) {
+    me.alive = false;
+    firing = false;
+    scoped = false;
+    deathAt = now;
+    killerId = null;
+    $('death-by').innerHTML = 'av <b style="color:#ff4d6d">BOT</b>';
+    $('death-weapon').innerHTML = '';
+    $('death').classList.remove('hidden');
+    sound.death();
+  }
+}
+
+function updatePracticeHud() {
+  const acc = stats.shots ? Math.round((stats.hits / stats.shots) * 100) : 0;
+  const hs = stats.hits ? Math.round((stats.heads / stats.hits) * 100) : 0;
+  $('practice-stats').innerHTML = `
+    <div class="ps-title">SKJUTBANAN</div>
+    <div class="ps-grid">
+      <span>Träff</span><b>${acc}%</b>
+      <span>Headshots</span><b>${hs}%</b>
+      <span>Kills</span><b>${stats.kills}</b>
+      <span>Skada</span><b>${stats.dmg}</b>
+      <span>Skott</span><b>${stats.shots}</b>
+    </div>
+    <div class="ps-keys"><kbd>1–4</kbd> gubbe · <kbd>B</kbd> bottar ${botsOn ? 'PÅ' : 'AV'} · <kbd>T</kbd> nollställ</div>`;
+}
+
 // ---------- loop ----------
 const clock = new THREE.Clock();
 function frame() {
   requestAnimationFrame(frame);
   const dt = Math.min(clock.getDelta(), 0.05);
   const now = performance.now();
+  if (practice) { updatePractice(dt, now); updatePracticeHud(); }
   if (playing) updateLocal(dt, now);
   else menuCamera(dt);
   const rt = serverOffset === null ? 0 : now + serverOffset - INTERP_MS;

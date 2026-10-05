@@ -108,4 +108,68 @@ function hamnen() {
   };
 }
 
+// ---------- Skjutbanan: övningsläge, körs bara lokalt ----------
+function skjutbanan() {
+  const { boxes, add } = builder();
+  add(0, -1, 0, 80, 1, 130, 'ground');
+  add(0, 0, -62, 80, 6, 2, 'wall');
+  add(0, 0, 62, 80, 6, 2, 'wall');
+  add(-40, 0, 0, 2, 6, 126, 'wall');
+  add(40, 0, 0, 2, 6, 126, 'wall');
+
+  // Skjutbås: låg disk med tak
+  add(-6, 0, 38, 24, 1.1, 0.5, 'concrete');
+  add(-6, 4, 41, 26, 0.3, 8, 'metal');
+  for (const x of [-18.5, 6.5]) add(x, 0, 41, 0.4, 4, 0.4, 'metal');
+  add(-6, 3.95, 37.2, 24, 0.05, 0.04, 'neon', { c: '#ffb020' });
+
+  // Avståndsskyltar (10, 25, 50, 75 m från disken)
+  for (const d of [10, 25, 50, 75]) {
+    const z = 38 - d;
+    add(-19, 0, z, 0.3, 2.5, 0.3, 'metal');
+    add(-19, 2.5, z, 2.2, 1, 0.2, 'concrete');
+    add(-19, 3.55, z + 0.11, 2.2, 0.06, 0.03, 'neon', { c: '#19e3ff' });
+    add(-6, 0.01, z, 26, 0.02, 0.15, 'neon', { c: '#2a5a70' });
+  }
+  // Skydd ute på banan
+  add(-12, 0, 8, 3, 1.1, 0.6, 'concrete');
+  add(0, 0, -2, 3, 1.1, 0.6, 'concrete');
+  add(-10, 0, -25, 1.5, 1.5, 1.5, 'crate');
+
+  // Parkour-del till höger
+  add(26, 0, 30, 1.5, 1.2, 1.5, 'crate');
+  add(30, 0, 24, 2, 2.4, 2, 'crate');
+  add(26, 0, 16, 2.6, 2.6, 6, 'container');
+  add(33, 0, 8, 2.6, 2.6, 6, 'container2');
+  add(33, 2.6, 8, 2.6, 2.6, 6, 'container');
+  add(24, 0, 0, 6, 3, 6, 'concrete');
+  for (let k = 0; k < 6; k++) add(24, 0, 3.4 + 0.8 * k, 3, (6 - k) * 0.5, 0.8, 'concrete');
+  add(30, 0, -12, 8, 0.6, 0.6, 'concrete');
+  add(22, 0, -20, 0.6, 1.1, 8, 'concrete');
+  add(30, 0, -30, 6, 5, 6, 'concrete');
+  add(18, 0, 20, 0.4, 6, 50, 'wall');
+
+  return {
+    name: 'SKJUTBANAN',
+    bounds: 60,
+    boxes,
+    spawns: [[-6, 0, 42]],
+    dummies: [
+      { p: [-10, 0, 28] }, { p: [-2, 0, 28] },
+      { p: [-14, 0, 13], move: 4, speed: 2.2 }, { p: [0, 0, 13] },
+      { p: [-6, 0, -12], move: 6, speed: 4.5 }, { p: [-14, 0, -12] },
+      { p: [-6, 0, -37], move: 5, speed: 3 }, { p: [2, 0, -37] },
+      { p: [-10, 0, 20], move: 3, speed: 7, strafe: true },
+    ],
+    theme: {
+      sky: { top: '#3a6fb8', mid: '#86ade0', horizon: '#e9d9c4', bottom: '#5d6670' },
+      fog: '#cfc9c0', fogNear: 60, fogFar: 300,
+      sun: '#fff0d8', sunIntensity: 3.4, sunDir: [-0.4, 0.75, 0.5],
+      hemiSky: '#cfe3ff', hemiGround: '#6b5e50', hemi: 1.3,
+      windows: 0.12, exposure: 0.95,
+    },
+  };
+}
+
 export const MAPS = [skymning(), hamnen()];
+export const RANGE = skjutbanan();
