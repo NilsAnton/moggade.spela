@@ -248,6 +248,60 @@ td { padding: 8px; font-size: 16px; border-bottom: 1px solid rgba(255, 255, 255,
 tr.me td { background: rgba(25, 227, 255, 0.1); }
 .dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 10px; }
 
+/* ---------- vapen ---------- */
+#menu { gap: 48px; }
+.weapons-panel { width: min(340px, 100%); }
+#weapons { display: flex; flex-direction: column; gap: 10px; }
+.weapon-card {
+  display: block;
+  width: 100%;
+  padding: 12px 14px;
+  text-align: left;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--glass);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  transition: border-color 0.15s, background 0.15s;
+}
+.weapon-card:hover { border-color: rgba(255, 255, 255, 0.3); }
+.weapon-card.active { border-color: var(--accent); background: rgba(25, 227, 255, 0.08); }
+.w-head { display: flex; align-items: center; gap: 10px; }
+.w-key { font-size: 11px; padding: 1px 6px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); }
+.w-name { font-size: 17px; font-weight: 700; letter-spacing: 2px; }
+.w-desc { margin: 4px 0 8px; font-size: 12px; color: var(--muted); }
+.stat { display: grid; grid-template-columns: 90px 1fr; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); margin-top: 3px; }
+.stat i { height: 4px; background: rgba(255, 255, 255, 0.1); border-radius: 2px; overflow: hidden; }
+.stat b { display: block; height: 100%; background: var(--accent); }
+#weapon-note { min-height: 18px; font-size: 13px; color: var(--accent); }
+#weapon-name { font-size: 11px; letter-spacing: 3px; color: var(--muted); }
+td.muted { color: var(--muted); font-size: 13px; }
+
+#death-weapon { display: flex; gap: 14px; justify-content: center; margin-top: 18px; font-size: 14px; color: var(--muted); }
+#death-weapon span.on { color: var(--accent); }
+#death .hint { margin-top: 6px; font-size: 12px; color: var(--muted); letter-spacing: 2px; }
+#re-next { margin-top: 6px; font-size: 18px; letter-spacing: 3px; }
+
+#timer { font-size: 13px; letter-spacing: 3px; color: var(--muted); margin-bottom: 2px; }
+#timer.low { color: #ff4d6d; }
+
+#scope {
+  position: absolute; inset: 0;
+  background:
+    linear-gradient(#000, #000) center / 100% 1px no-repeat,
+    linear-gradient(#000, #000) center / 1px 100% no-repeat,
+    radial-gradient(circle at center, transparent 0, transparent min(38vh, 38vw), rgba(0, 0, 0, 0.6) calc(min(38vh, 38vw) + 1px), #000 calc(min(38vh, 38vw) + 6px));
+}
+#scope::after {
+  content: '';
+  position: absolute; left: 50%; top: 50%;
+  width: 4px; height: 4px; margin: -2px 0 0 -2px;
+  border-radius: 50%;
+  background: #ff3344;
+}
+
 @media (max-width: 700px) {
   #menu { padding: 0 16px; justify-content: center; background: rgba(8, 9, 16, 0.75); }
   h1 { font-size: 52px; }

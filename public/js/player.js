@@ -30,7 +30,7 @@ export class RemotePlayer {
     this.color = '#ffffff';
 
     this.mat = new THREE.MeshStandardMaterial({ color: this.color, roughness: 0.55, metalness: 0.1 });
-    this.visor = new THREE.MeshStandardMaterial({ color: 0x050505, emissive: this.color, emissiveIntensity: 2.4, roughness: 0.2 });
+    this.visor = new THREE.MeshStandardMaterial({ color: 0x050505, emissive: this.color, emissiveIntensity: 1.2, roughness: 0.2 });
 
     const g = (this.group = new THREE.Group());
     const mesh = (geo, mat, x, y, z, parent) => {
@@ -56,7 +56,7 @@ export class RemotePlayer {
     mesh(G.visor, this.visor, 0, 0.24, -0.205, this.head);
 
     this.arms = new THREE.Group(); this.arms.position.set(0, 1.32, 0); this.body.add(this.arms);
-    mesh(G.gun, gunMat, 0.16, 0, -0.4, this.arms);
+    this.gun = mesh(G.gun, gunMat, 0.16, 0, -0.4, this.arms);
     mesh(G.arm, this.mat, 0.24, -0.04, -0.12, this.arms);
     mesh(G.arm, this.mat, -0.02, -0.04, -0.3, this.arms).rotation.y = -0.6;
     this.muzzle = new THREE.Object3D();
@@ -74,6 +74,13 @@ export class RemotePlayer {
 
     g.visible = false;
     scene.add(g);
+  }
+
+  setWeapon(w) {
+    const len = [1, 0.7, 0.9, 1.4][w] ?? 1;
+    this.gun.scale.z = len;
+    this.gun.position.z = -0.1 - 0.3 * len;
+    this.muzzle.position.z = -0.12 - 0.62 * len;
   }
 
   setInfo(name, color) {

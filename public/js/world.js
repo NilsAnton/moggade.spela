@@ -2,10 +2,6 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
-const SUN_DIR = new THREE.Vector3(0.5, 0.58, -0.42).normalize();
-const SKY = { top: '#0d1638', mid: '#47387a', horizon: '#ff8a5c', bottom: '#241a2e' };
-const FOG = '#a0607a';
-
 const rand = Math.random;
 
 // ---------- procedurella texturer ----------
@@ -105,8 +101,13 @@ const TEX = {
       g.beginPath(); g.arc(x * s, y * s, 5, 0, Math.PI * 2); g.fill();
     }
   },
-  ribs: (g, s) => {
-    g.fillStyle = '#a8432c'; g.fillRect(0, 0, s, s);
+  ribs: (g, s) => ribs(g, s, '#a8432c'),
+  ribsBlue: (g, s) => ribs(g, s, '#2d5f8f'),
+};
+
+function ribs(g, s, color) {
+  {
+    g.fillStyle = color; g.fillRect(0, 0, s, s);
     const n = 10, w = s / n;
     for (let i = 0; i < n; i++) {
       const grd = g.createLinearGradient(i * w, 0, (i + 1) * w, 0);
@@ -117,8 +118,8 @@ const TEX = {
     }
     stains(g, s, 10, 0.35);
     speckle(g, s, 3000, 0.2, false);
-  },
-};
+  }
+}
 
 function windowTextures() {
   const lit = [];
@@ -162,18 +163,18 @@ function boxGeometry(p, s, tile) {
   return g;
 }
 
-function skyDome() {
+function skyDome(t) {
   const mat = new THREE.ShaderMaterial({
     side: THREE.BackSide,
     depthWrite: false,
     fog: false,
     uniforms: {
-      top: { value: new THREE.Color(SKY.top) },
-      mid: { value: new THREE.Color(SKY.mid) },
-      horizon: { value: new THREE.Color(SKY.horizon) },
-      bottom: { value: new THREE.Color(SKY.bottom) },
-      sunDir: { value: SUN_DIR },
-      sunColor: { value: new THREE.Color('#ffd0a0') },
+      top: { value: new THREE.Color(t.sky.top) },
+      mid: { value: new THREE.Color(t.sky.mid) },
+      horizon: { value: new THREE.Color(t.sky.horizon) },
+      bottom: { value: new THREE.Color(t.sky.bottom) },
+      sunDir: { value: new THREE.Vector3(...t.sunDir).normalize() },
+      sunColor: { value: new THREE.Color(t.sun) },
     },
     vertexShader: /* glsl */`
       varying vec3 vDir;
@@ -191,14 +192,14 @@ function skyDome() {
         col = mix(col, top, smoothstep(0.2, 0.85, h));
         col = mix(col, bottom, smoothstep(0.0, 0.15, -h));
         float s = max(dot(d, sunDir), 0.0);
-        col += sunColor * (pow(s, 900.0) * 30.0 + pow(s, 12.0) * 0.35 + pow(s, 3.0) * 0.12);
+        col += sunColor * (pow(s, 900.0) * 20.0 + pow(s, 12.0) * 0.3 + pow(s, 3.0) * 0.1);
         gl_FragColor = vec4(col, 1.0);
       }`,
   });
   return new THREE.Mesh(new THREE.SphereGeometry(500, 32, 16), mat);
 }
 
-function skyline(scene) {
+function skyline(group, t) {
   const { facade, emissive } = windowTextures();
   const geos = [];
   const n = 54;
@@ -211,31 +212,38 @@ function skyline(scene) {
     geos.push(g);
   }
   const mat = new THREE.MeshStandardMaterial({
-    map: facade, emissiveMap: emissive, emissive: 0xffffff, emissiveIntensity: 1.6, roughness: 0.9,
+    map: facade, emissiveMap: emissive, emissive: 0xffffff, emissiveIntensity: t.windows, roughness: 0.9,
   });
-  scene.add(new THREE.Mesh(mergeGeometries(geos), mat));
+  group.add(new THREE.Mesh(mergeGeometries(geos), mat));
 }
 
-export function buildWorld(scene, renderer, map) {
-  scene.background = new THREE.Color(SKY.horizon);
-  scene.fog = new THREE.Fog(FOG, 30, 210);
-  scene.add(skyDome());
+let envTexture = null;
 
-  const pmrem = new THREE.PMREMGenerator(renderer);
-  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+// Bygger en bana i en egen grupp. Returnerar en funktion som tar bort den igen.
+export function buildWorld(scene, renderer, map) {
+  const t = map.theme;
+  const group = new THREE.Group();
+  scene.add(group);
+
+  scene.background = new THREE.Color(t.sky.horizon);
+  scene.fog = new THREE.Fog(t.fog, t.fogNear, t.fogFar);
+  renderer.toneMappingExposure = t.exposure;
+  if (!envTexture) envTexture = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+  scene.environment = envTexture;
   scene.environmentIntensity = 0.3;
 
-  scene.add(new THREE.HemisphereLight('#8ea2ff', '#5a3e44', 1.1));
+  group.add(skyDome(t));
+  group.add(new THREE.HemisphereLight(t.hemiSky, t.hemiGround, t.hemi));
 
-  const sun = new THREE.DirectionalLight('#ffbf8a', 3.2);
-  sun.position.copy(SUN_DIR).multiplyScalar(70);
+  const sun = new THREE.DirectionalLight(t.sun, t.sunIntensity);
+  sun.position.set(...t.sunDir).normalize().multiplyScalar(70);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   const sc = sun.shadow.camera;
   sc.left = sc.bottom = -48; sc.right = sc.top = 48; sc.near = 1; sc.far = 180;
   sun.shadow.bias = -0.0004;
   sun.shadow.normalBias = 0.04;
-  scene.add(sun, sun.target);
+  group.add(sun, sun.target);
 
   const T = {};
   const tex = (name) => (T[name] ??= canvasTexture(256, TEX[name]));
@@ -246,11 +254,12 @@ export function buildWorld(scene, renderer, map) {
     metal: { tex: 'plate', tile: 2, rough: 0.42, metal: 0.65 },
     crate: { tex: 'crate', tile: 0, rough: 0.78, metal: 0 },
     container: { tex: 'ribs', tile: 2.6, rough: 0.55, metal: 0.45 },
+    container2: { tex: 'ribsBlue', tile: 2.6, rough: 0.55, metal: 0.45 },
   };
 
   const groups = new Map();
   const neonLights = [];
-  for (const b of map) {
+  for (const b of map.boxes) {
     const key = b.m === 'neon' ? `neon:${b.c}` : b.m;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(boxGeometry(b.p, b.s, b.m === 'neon' ? 0 : MATS[b.m].tile));
@@ -258,26 +267,30 @@ export function buildWorld(scene, renderer, map) {
   }
 
   for (const [key, geos] of groups) {
-    let mat;
-    if (key.startsWith('neon:')) {
-      const c = key.slice(5);
-      mat = new THREE.MeshStandardMaterial({ color: '#000', emissive: c, emissiveIntensity: 4 });
-    } else {
-      const m = MATS[key];
-      mat = new THREE.MeshStandardMaterial({ map: tex(m.tex), roughness: m.rough, metalness: m.metal });
-    }
+    const neon = key.startsWith('neon:');
+    const mat = neon
+      ? new THREE.MeshStandardMaterial({ color: '#000', emissive: key.slice(5), emissiveIntensity: 1.6 })
+      : new THREE.MeshStandardMaterial({ map: tex(MATS[key].tex), roughness: MATS[key].rough, metalness: MATS[key].metal });
     const mesh = new THREE.Mesh(mergeGeometries(geos), mat);
-    mesh.castShadow = !key.startsWith('neon:') && key !== 'ground';
+    mesh.castShadow = !neon && key !== 'ground';
     mesh.receiveShadow = true;
-    scene.add(mesh);
+    group.add(mesh);
   }
 
-  // Lite färgat ljus från de längsta neonlisterna
-  for (const b of neonLights.filter((_, i) => i % 2 === 0).slice(0, 8)) {
-    const l = new THREE.PointLight(b.c, 5, 9, 2);
+  for (const b of neonLights.slice(0, 4)) {
+    const l = new THREE.PointLight(b.c, 2, 7, 2);
     l.position.set(b.p[0], b.p[1], b.p[2]);
-    scene.add(l);
+    group.add(l);
   }
 
-  skyline(scene);
+  skyline(group, t);
+
+  return () => {
+    scene.remove(group);
+    group.traverse((o) => {
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) { o.material.map?.dispose(); o.material.emissiveMap?.dispose(); o.material.dispose(); }
+      if (o.isLight && o.shadow?.map) o.shadow.map.dispose();
+    });
+  };
 }

@@ -93,16 +93,29 @@ export class Sound {
   }
 
   // dist = 0 betyder ditt eget vapen
-  shoot(dist = 0, pan = 0) {
+  shoot(dist = 0, pan = 0, type = 'rifle') {
     if (!this.ctx) return;
+    const v = {
+      rifle: { len: 0.17, thump: 160, vol: 1, rate: 0.9 },
+      smg: { len: 0.11, thump: 200, vol: 0.75, rate: 1.15 },
+      shotgun: { len: 0.35, thump: 110, vol: 1.3, rate: 0.6 },
+      sniper: { len: 0.5, thump: 90, vol: 1.5, rate: 0.55 },
+    }[type] ?? { len: 0.17, thump: 160, vol: 1, rate: 0.9 };
     const t = this.ctx.currentTime;
     const local = dist === 0;
-    const gain = local ? 0.5 : 0.65 / (1 + dist * 0.12);
+    const gain = (local ? 0.5 : 0.65 / (1 + dist * 0.12)) * v.vol;
     const lp = local ? 9000 : Math.max(900, 7000 - dist * 110);
     const out = this.out(gain, pan, local ? 0.45 : 0.9);
-    this.noiseHit(out, t, 0.17, { f0: lp, f1: 300, g0: 1, rate: 0.8 + Math.random() * 0.3 });
-    this.tone(out, t, 0.14, { f0: 160, f1: 42, g0: local ? 1 : 0.6 });
+    this.noiseHit(out, t, v.len, { f0: lp, f1: 250, g0: 1, rate: v.rate + Math.random() * 0.2 });
+    this.tone(out, t, v.len * 0.8, { f0: v.thump, f1: 38, g0: local ? 1 : 0.6 });
     if (local) this.noiseHit(out, t, 0.03, { type: 'highpass', f0: 3200, f1: 2000, g0: 0.35 });
+  }
+
+  bolt() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime, out = this.out(0.3);
+    this.noiseHit(out, t, 0.06, { type: 'bandpass', f0: 1800, f1: 1400, q: 3 });
+    this.noiseHit(out, t + 0.25, 0.06, { type: 'bandpass', f0: 2600, f1: 2000, q: 3 });
   }
 
   hit() {
@@ -155,12 +168,12 @@ export class Sound {
     this.noiseHit(this.out(0.35), this.ctx.currentTime, 0.03, { type: 'bandpass', f0: 3500, f1: 3000, q: 4 });
   }
 
-  reload() {
+  reload(scale = 1) {
     if (!this.ctx) return;
     const t = this.ctx.currentTime, out = this.out(0.3);
     const click = (at, f) => {
-      this.noiseHit(out, t + at, 0.05, { type: 'bandpass', f0: f, f1: f * 0.7, q: 3, g0: 0.9 });
-      this.tone(out, t + at, 0.05, { type: 'square', f0: f / 4, f1: f / 6, g0: 0.08 });
+      this.noiseHit(out, t + at * scale, 0.05, { type: 'bandpass', f0: f, f1: f * 0.7, q: 3, g0: 0.9 });
+      this.tone(out, t + at * scale, 0.05, { type: 'square', f0: f / 4, f1: f / 6, g0: 0.08 });
     };
     click(0.2, 2200);
     click(0.9, 2600);

@@ -116,7 +116,7 @@ export class Effects {
     this.ti = 0;
     for (let i = 0; i < 32; i++) {
       const mesh = new THREE.Mesh(tg, new THREE.MeshBasicMaterial({
-        color: new THREE.Color(6, 4, 1.8), transparent: true, opacity: 0.85,
+        color: new THREE.Color(3, 2.2, 1.1), transparent: true, opacity: 0.85,
         depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
       }));
       mesh.visible = false;
@@ -164,7 +164,7 @@ export class Effects {
   }
 
   impact(p, n) {
-    this.sparks.emit(p, n, 12, { speed: 7, spread: 0.9, life: 0.3, color: [4, 2.6, 1.2, 1] });
+    this.sparks.emit(p, n, 12, { speed: 7, spread: 0.9, life: 0.3, color: [2.5, 1.7, 0.8, 1] });
     this.dust.emit(p, n, 5, { speed: 1.4, spread: 0.6, life: 0.9, color: [0.55, 0.52, 0.5, 0.45] });
     const d = this.decals[this.di++ % this.decals.length];
     d.position.copy(p).addScaledVector(n, 0.004);
