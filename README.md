@@ -24,23 +24,23 @@ Körs i Docker på en Synology NAS och nås från internet via en Cloudflare Tun
 WebSockets fungerar direkt genom tunneln. Du behöver inte ändra några inställningar för det.
 
 ## 2. Lägg upp på Synology NAS
-1. Kopiera hela mappen till NAS:en, t.ex. till `/volume1/docker/moggade`. Du kan använda File Station.
-2. Skapa filen `.env` i samma mapp (kopiera `.env.example`) och klistra in din `TUNNEL_TOKEN`.
-3. Öppna **Container Manager → Projekt → Skapa**.
-   - Projektnamn: `moggade`
-   - Sökväg: mappen ovan
-   - Välj *Använd befintlig docker-compose.yml*
-4. Klicka igenom guiden så bygger och startar den allt.
+GitHub bygger spelet åt dig (se `.github/workflows/docker.yml`). NAS:en hämtar bara den färdiga imagen, så du behöver aldrig ladda upp spelfilerna dit.
 
-Nu kan ni spela på `https://fps.dindomän.se`.
-På hemnätverket går det även att gå direkt till `http://NAS-IP:3000`.
+**Första gången:**
+1. Pusha repot till GitHub och vänta tills den gröna bocken under **Actions** syns.
+2. På GitHub: din profil → **Packages** → paketet → **Package settings** → **Change visibility → Public**. (Annars måste NAS:en logga in mot ghcr.io.)
+3. Skapa mappen `/volume1/docker/moggade` i File Station och lägg dit **bara** `docker-compose.yml` och `.env` (kopia av `.env.example` med din `TUNNEL_TOKEN`).
+4. **Container Manager → Projekt → Skapa**. Projektnamn: `moggade`, sökväg: mappen ovan, *Använd befintlig docker-compose.yml*.
 
-### Uppdatera efter ändringar
-1. Kopiera in de nya filerna till mappen på NAS:en.
-2. Öppna `.env` (med Text Editor i DSM) och höj `APP_VERSION`, t.ex. `1.0.0` → `1.0.1`.
-3. Container Manager → Projekt → moggade → **Åtgärd → Bygg**.
+Nu kan ni spela på `https://fps.dindomän.se`, och på hemnätverket via `http://NAS-IP:3000`.
 
-**Ångra en uppdatering:** sätt tillbaka `APP_VERSION` till den gamla versionen och starta projektet igen. Den gamla versionen finns kvar på NAS:en, så den behöver inte byggas om.
+### Uppdatera spelet
+1. Höj `"version"` i `package.json`, t.ex. `1.0.0` → `1.0.1`.
+2. **Commit** och **Push** i GitHub Desktop. Vänta på den gröna bocken under Actions (ett par minuter).
+3. På NAS:en: öppna `.env` med Text Editor och sätt `APP_VERSION=1.0.1`.
+4. Container Manager → Projekt → moggade → **Åtgärd → Bygg**. Då hämtas den nya versionen.
+
+**Ångra:** sätt tillbaka `APP_VERSION` till den gamla versionen och kör **Bygg** igen.
 
 Via SSH: `./update.sh 1.0.1`
 

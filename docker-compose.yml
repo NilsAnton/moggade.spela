@@ -1,7 +1,6 @@
 services:
   game:
-    build: .
-    image: moggade:${APP_VERSION:-latest}
+    image: ${APP_IMAGE}:${APP_VERSION}
     container_name: moggade-game
     restart: unless-stopped
     environment:
