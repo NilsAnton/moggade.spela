@@ -103,6 +103,8 @@ const TEX = {
   },
   ribs: (g, s) => ribs(g, s, '#a8432c'),
   ribsBlue: (g, s) => ribs(g, s, '#2d5f8f'),
+  ribsGreen: (g, s) => ribs(g, s, '#3d6a3f'),
+  ribsYellow: (g, s) => ribs(g, s, '#b8892c'),
 };
 
 function ribs(g, s, color) {
@@ -255,6 +257,8 @@ export function buildWorld(scene, renderer, map) {
     crate: { tex: 'crate', tile: 0, rough: 0.78, metal: 0 },
     container: { tex: 'ribs', tile: 2.6, rough: 0.55, metal: 0.45 },
     container2: { tex: 'ribsBlue', tile: 2.6, rough: 0.55, metal: 0.45 },
+    container3: { tex: 'ribsGreen', tile: 2.6, rough: 0.55, metal: 0.45 },
+    container4: { tex: 'ribsYellow', tile: 2.6, rough: 0.55, metal: 0.45 },
   };
 
   const groups = new Map();

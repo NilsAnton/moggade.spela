@@ -1,7 +1,7 @@
 // Serverbottar – spelar som riktiga spelare: samma fysik, samma vapen, samma regler.
 import { moveBody, raycastWorld, PLAYER } from '../public/js/physics.js';
 import { WEAPONS } from '../public/js/weapons.js';
-import { CHARACTERS, RADAR_MS } from '../public/js/characters.js';
+import { CHARACTERS, ABILITY } from '../public/js/characters.js';
 
 export const BOT_NAMES = ['Kalle', 'Stina', 'Bosse', 'Greta', 'Måns', 'Tuva', 'Sixten', 'Majken'];
 
@@ -113,7 +113,17 @@ export function botThink(room, p, now, dt) {
       }
       if (near) { b.goal = [near.x, near.y, near.z]; b.goalUntil = now + 1500; }
     }
-    if (!b.goal || now > b.goalUntil || Math.hypot(b.goal[0] - p.x, b.goal[2] - p.z) < 1.5) {
+    if (lowHp) {
+      // lite HP och ingen fiende i sikte: gå till närmaste redo hälsoplatta
+      let pad = null, pd = Infinity;
+      for (const d of room.pads ?? []) {
+        if (now < d.readyAt) continue;
+        const dd = Math.hypot(d.p[0] - p.x, d.p[2] - p.z);
+        if (dd < pd) { pad = d; pd = dd; }
+      }
+      if (pad) { b.goal = pad.p; b.goalUntil = now + 4000; }
+    }
+    if (!b.goal || now > b.goalUntil || Math.hypot(b.goal[0] - p.x, b.goal[2] - p.z) < (lowHp ? 0.3 : 1.5)) {
       b.goal = room.map.spawns[Math.floor(Math.random() * room.map.spawns.length)];
       b.goalUntil = now + 9000;
     }
@@ -192,13 +202,13 @@ function useAbility(room, p, b, ch, now) {
   else if (ab.id === 'slam') use = dist < SLAM_RANGE && Math.abs(t.y - p.y) < 2;
   else if (ab.id === 'dash') {
     use = t && (dist > 10 || now - b.hurtAt < 300) && Math.random() < 0.02;
-    if (use) { const d = dist || 1; b.body.v[0] = ((t.x - p.x) / d) * 18; b.body.v[2] = ((t.z - p.z) / d) * 18; }
+    if (use) { const d = dist || 1; const sp = ABILITY.dashSpeed * 0.8; b.body.v[0] = ((t.x - p.x) / d) * sp; b.body.v[2] = ((t.z - p.z) / d) * sp; }
   } else if (ab.id === 'radar') {
     use = !t && Math.random() < 0.01;
-    if (use) b.radarUntil = now + RADAR_MS;
+    if (use) b.radarUntil = now + ABILITY.radarMs;
   } else if (ab.id === 'leap') {
     use = b.body.ground && !t && Math.random() < 0.004;
-    if (use) b.body.v[1] = 13.5;
+    if (use) b.body.v[1] = ABILITY.leapPower;
   }
   if (use) room.onAbility(p);
 }

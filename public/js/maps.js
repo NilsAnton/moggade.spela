@@ -51,6 +51,7 @@ function skymning() {
     name: 'SKYMNING',
     bounds: 31,
     boxes,
+    pads: [[-16, 0, -6], [16, 0, 6]], // hälsoplattor
     spawns: [...rot4([0, 0, -26]), ...rot4([-16, 0, 8]), ...rot4([-22, 3, -21])],
     theme: {
       sky: { top: '#0d1638', mid: '#47387a', horizon: '#ff8a5c', bottom: '#241a2e' },
@@ -97,6 +98,7 @@ function hamnen() {
     name: 'HAMNEN',
     bounds: 31,
     boxes,
+    pads: [[6, 0, -18], [-6, 0, 18]],
     spawns: [...rot4([0, 0, -27]), ...rot4([-28, 0, -28]), ...rot4([-14, 0, -14]), ...rot4([-18, 2.6, -18])],
     theme: {
       sky: { top: '#2f6fc4', mid: '#7fb0e6', horizon: '#dce7f1', bottom: '#5d6670' },
@@ -108,53 +110,62 @@ function hamnen() {
   };
 }
 
-// ---------- Neonstad: nattlig takarena med mittplattform och torn ----------
-function neonstad() {
+// ---------- Shipment: liten containerbana på ett fartygsdäck (inspirerad av CoD4:s Shipment) ----------
+// Kvadratisk gård (34 × 34 m) med ett rutnät av containrar: staplar i hörnen, liggande containrar mitt på
+// varje sida och en i mitten. Smala gångar emellan, lådor att gömma sig bakom och lådtrappor upp på mittcontainrarna.
+function shipment() {
   const { boxes, add, add4 } = builder();
-  add(0, -1, 0, 72, 1, 72, 'ground');
-  add4(0, 0, -32, 66, 7, 2, 'wall');
-  add4(0, 7, -32, 66, 0.3, 2.4, 'metal');
-  add4(-16, 4.5, -30.96, 14, 0.12, 0.06, 'neon', { c: '#ff2bd6' });
-  add4(16, 2.2, -30.96, 14, 0.12, 0.06, 'neon', { c: '#19e3ff' });
+  const L = 6.1, W = 2.44, H = 2.6; // en vanlig 20-fots container
+  const COLS = ['container', 'container2', 'container3', 'container4'];
+  add(0, -1, 0, 60, 1, 60, 'ground');
 
-  // Mittplattform med trappor åt alla håll
-  add(0, 0, 0, 10, 3, 10, 'metal');
-  for (let k = 0; k < 6; k++) add4(0, 0, -(5.4 + 0.8 * k), 3, (6 - k) * 0.5, 0.8, 'concrete');
-  add4(-3.6, 3, -3.6, 1.6, 1.1, 1.6, 'crate');
-  add4(0, 2.94, -5.02, 10, 0.06, 0.04, 'neon', { c: '#ff2bd6' });
+  // Ytterkant: containrar staplade två högt runt hela gården (insidan går vid 17 m)
+  for (let i = 0; i < 6; i++) {
+    const x = -15.25 + i * L;
+    add4(x, 0, -17 - H / 2, L, H, H, COLS[i % 4]);
+    add4(x, H, -17 - H / 2, L, H, H, COLS[(i + 2) % 4]);
+  }
+  // några på tredje våningen, för siluettens skull
+  add4(-9.15, H * 2, -17 - H / 2, L, H, H, 'container3');
+  add4(9.15, H * 2, -17 - H / 2, L, H, H, 'container');
+  // strålkastare längs kanten
+  add4(-6, H * 2 + 0.02, -17.05, 3, 0.1, 0.1, 'neon', { c: '#ffb35a' });
+  add4(6, H * 2 + 0.02, -17.05, 3, 0.1, 0.1, 'neon', { c: '#ffb35a' });
 
-  // Hörntorn med trappa
-  add4(-22, 0, -22, 5, 4, 5, 'concrete');
-  add4(-24.35, 4, -22, 0.3, 1, 5, 'metal');
-  add4(-22, 4, -24.35, 5, 1, 0.3, 'metal');
-  for (let k = 0; k < 8; k++) add4(-19.1 + 0.8 * k, 0, -23, 0.8, (8 - k) * 0.5, 2, 'concrete');
-  add4(-19.48, 3.2, -22, 0.04, 0.06, 5, 'neon', { c: '#19e3ff' });
+  // Hörn: två containrar sida vid sida, en tredje ovanpå (två höga – går bara att nå med superhopp)
+  add4(-9.5, 0, -9.5 - W / 2, L, H, W, 'container2');
+  add4(-9.5, 0, -9.5 + W / 2, L, H, W, 'container');
+  add4(-9.5, H, -9.5 - W / 2, L, H, W, 'container4');
 
-  // Pelare med neonband
-  add4(-9, 0, -9, 1, 5.5, 1, 'metal');
-  add4(-9, 2.6, -9, 1.04, 0.08, 1.04, 'neon', { c: '#ffb020' });
+  // Mitt på varje sida: en liggande container med lådtrappa upp från insidan
+  add4(0, 0, -9.5, L, H, W, 'container3');
+  add4(1.6, 0, -9.5 + W / 2 + 0.55, 1.1, 2.0, 1.1, 'crate');
+  add4(1.6, 0, -9.5 + W / 2 + 1.65, 1.1, 1.1, 1.1, 'crate');
 
-  // Skydd i gångarna
-  add4(-10, 0, -17, 6, 1.1, 0.6, 'concrete');
-  add4(-17, 0, -9, 0.6, 1.1, 4, 'concrete');
-  add4(4, 0, -15, 1.5, 1.5, 1.5, 'crate');
-  add4(5.3, 0, -16.4, 1.1, 1.1, 1.1, 'crate');
-  add4(12, 0, -24, 6, 2.6, 2.6, 'container2');
-  add4(25, 0, -9, 2.6, 2.6, 6, 'container');
-  add4(25, 2.6, -9, 2.6, 2.6, 6, 'container2');
-  add4(-3, 0, -24, 1.2, 1.2, 1.2, 'crate');
+  // Mitten: en container och skydd runt den
+  add(0, 0, 0, W, H, L, 'container4');
+  add(-2.6, 0, 1.6, 1.2, 1.2, 1.2, 'crate');
+  add(2.6, 0, -1.6, 1.2, 1.2, 1.2, 'crate');
+
+  // Lådor i gångarna
+  add4(-5, 0, -14.6, 1.2, 1.2, 1.2, 'crate');
+  add4(-14.4, 0, -5.2, 1.5, 1.5, 1.5, 'crate');
+  add4(-14.4, 1.5, -5.2, 1.1, 1.1, 1.1, 'crate');
+  add4(-4.6, 0, -6.2, 1.1, 1.1, 1.1, 'crate');
+  add4(-15.6, 0, -15.6, 1.4, 1.4, 1.4, 'crate');
 
   return {
-    name: 'NEONSTAD',
-    bounds: 31,
+    name: 'SHIPMENT',
+    bounds: 17,
     boxes,
-    spawns: [...rot4([0, 0, -28]), ...rot4([-22, 4, -22]), ...rot4([-14, 0, -13]), ...rot4([-27, 0, -2])],
+    pads: [[-8, 0, -14.6], [8, 0, 14.6]],
+    spawns: [...rot4([-13.8, 0, -13.8]), ...rot4([0, 0, -14.4]), ...rot4([-5.2, 0, -5.2]), ...rot4([-14.4, 0, 1.5])],
     theme: {
-      sky: { top: '#03040c', mid: '#1b0f3d', horizon: '#c2187a', bottom: '#0b0614' },
-      fog: '#2b1244', fogNear: 25, fogFar: 170,
-      sun: '#a9b8ff', sunIntensity: 1.7, sunDir: [-0.35, 0.7, 0.4],
-      hemiSky: '#6a5cff', hemiGround: '#2a1030', hemi: 1.0,
-      windows: 1.2, exposure: 1.15,
+      sky: { top: '#2b3442', mid: '#6d7480', horizon: '#d9a86e', bottom: '#23272e' },
+      fog: '#8f877b', fogNear: 30, fogFar: 150,
+      sun: '#ffd2a1', sunIntensity: 2.4, sunDir: [0.55, 0.45, -0.5],
+      hemiSky: '#9fb0c8', hemiGround: '#4a4038', hemi: 1.15,
+      windows: 0.6, exposure: 1.05,
     },
   };
 }
@@ -222,5 +233,5 @@ function skjutbanan() {
   };
 }
 
-export const MAPS = [skymning(), hamnen(), neonstad()];
+export const MAPS = [skymning(), hamnen(), shipment()];
 export const RANGE = skjutbanan();

@@ -1,41 +1,52 @@
-// Spelarprofil: XP, nivå, rang och livstidsstatistik. Sparas lokalt i webbläsaren.
-const KEY = 'moggade-profile';
+// Spelarprofil på klienten. Servern räknar all XP och statistik och skickar den hit.
+// Inloggad (Discord): profilen sparas på servern. Gäst: den sparas bara i den här webbläsaren.
+import { freshProfile, cleanProfile, levelInfo as infoFor } from './progress.js';
 
-export const RANKS = ['REKRYT', 'MENIG', 'KORPRAL', 'SERGEANT', 'FÄNRIK', 'LÖJTNANT', 'KAPTEN', 'MAJOR', 'ÖVERSTE', 'GENERAL', 'MOGGAD LEGEND'];
+export { rankName, XP, REWARDS, TITLES, COLORS, hasReward, newRewards } from './progress.js';
 
-// XP-belöningar
-export const XP = { kill: 100, head: 40, multi: 50, streak: 25, win: 500, round: 150, level: 60, assistDmg: 0.5 };
+const KEY = 'moggade-profile'; // samma nyckel som innan namnbytet, så att ingen tappar sina framsteg
 
-// Färger (index i COLORS) och vilken nivå som låser upp dem
-export const COLOR_UNLOCK = [1, 1, 1, 1, 3, 6, 10, 15];
+export const profile = freshProfile();
+export const account = { user: null, discord: false, loaded: false };
 
-const fresh = () => ({ xp: 0, kills: 0, deaths: 0, heads: 0, wins: 0, games: 0, bestStreak: 0, shots: 0, hits: 0, dmg: 0 });
+function loadGuest() {
+  try { return cleanProfile(JSON.parse(localStorage.getItem(KEY) || '{}')); } catch { return freshProfile(); }
+}
+Object.assign(profile, loadGuest());
 
-export const profile = fresh();
-try { Object.assign(profile, JSON.parse(localStorage.getItem(KEY) || '{}')); } catch {}
+export const levelInfo = (xp = profile.xp) => infoFor(xp);
 
-export function saveProfile() {
-  try { localStorage.setItem(KEY, JSON.stringify(profile)); } catch {}
+// Ny profil från servern
+export function setProfile(p) {
+  Object.assign(profile, cleanProfile(p));
+  if (!account.user) {
+    try { localStorage.setItem(KEY, JSON.stringify(profile)); } catch {}
+  }
 }
 
-// XP som krävs för att gå från nivå n till n+1
-export const xpFor = (n) => 400 + n * 200;
-
-export function levelInfo(xp = profile.xp) {
-  let lvl = 1, left = xp;
-  while (left >= xpFor(lvl)) { left -= xpFor(lvl); lvl++; }
-  return { lvl, cur: left, need: xpFor(lvl), rank: rankName(lvl) };
+// Frågar servern vem vi är. Första inloggningen flyttar gäst-profilen till kontot (en gång).
+export async function loadAccount() {
+  try {
+    const me = await fetch('/api/me', { credentials: 'same-origin' }).then((r) => r.json());
+    account.discord = !!me.discord;
+    account.user = me.user;
+    if (me.user) {
+      const guest = loadGuest();
+      if (me.user.canImport && guest.xp > 0) {
+        const r = await fetch('/api/import', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prof: guest }),
+        }).then((x) => x.json());
+        if (r.ok) me.user.prof = r.prof;
+      }
+      Object.assign(profile, cleanProfile(me.user.prof));
+    }
+  } catch {}
+  account.loaded = true;
+  return account;
 }
 
-export function rankName(lvl) {
-  return RANKS[Math.min(RANKS.length - 1, Math.floor((lvl - 1) / 5))];
-}
-
-// Ger XP och returnerar { gained, levelUp, info }
-export function addXp(amount) {
-  const before = levelInfo().lvl;
-  profile.xp += Math.max(0, Math.round(amount));
-  saveProfile();
-  const info = levelInfo();
-  return { gained: amount, levelUp: info.lvl > before ? info.lvl : 0, info };
+export async function logout() {
+  try { await fetch('/auth/logout', { method: 'POST' }); } catch {}
+  account.user = null;
+  Object.assign(profile, loadGuest());
 }

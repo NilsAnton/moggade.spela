@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MOGGADE</title>
+  <title>LOCKDOWN</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
   <script type="importmap">
     {
@@ -20,112 +20,243 @@
 <body>
   <div id="game"></div>
 
+  <!-- ================= HUD ================= -->
   <div id="hud" class="hidden">
     <div id="vignette"></div>
     <div id="dmg-indicators"></div>
-    <div id="crosshair"><i class="t"></i><i class="b"></i><i class="l"></i><i class="r"></i><i class="c"></i></div>
+    <div id="crosshair" class="crosshair"><i class="t"></i><i class="b"></i><i class="l"></i><i class="r"></i><i class="c"></i></div>
     <div id="hitmarker"></div>
     <div id="dmg-numbers"></div>
     <div id="xp-feed"></div>
     <div id="buff" class="hidden"></div>
     <div id="scope" class="hidden"></div>
-    <div id="topbar"><div id="timer"></div><div id="my-score"></div><div id="leader"></div></div>
+
+    <div id="topbar">
+      <div id="timer"></div>
+      <div id="my-score"></div>
+      <div id="leader"></div>
+    </div>
     <div id="killfeed"></div>
     <div id="center-msg"></div>
     <div id="protect" class="hidden">SPAWNSKYDD</div>
-    <div id="health">
-      <div class="label">HÄLSA</div>
-      <div id="hp-num">100</div>
+
+    <div id="health" class="hud-box">
+      <div class="hp-row"><span class="hud-label">HÄLSA</span><span id="hp-num">100</span></div>
       <div class="bar"><div id="hp-bar"></div></div>
     </div>
-    <div id="ammo">
-      <div id="weapon-name"></div>
-      <div><span id="ammo-num">30</span><span class="sep">/</span><span class="inf">∞</span></div>
-      <div id="reload-hint"></div>
+
+    <div id="loadout">
+      <div id="ability" class="hud-box">
+        <div class="ab-ring"></div>
+        <kbd>E</kbd>
+        <div id="ability-cd"></div>
+        <div id="ability-name"></div>
+      </div>
+      <div id="ammo" class="hud-box">
+        <div id="slots"><span class="s1"><kbd>1</kbd><b id="slot-1"></b></span><span class="s2"><kbd>2</kbd><b>KNIV</b></span></div>
+        <div id="weapon-name"></div>
+        <div class="ammo-row"><span id="ammo-num">30</span><span class="sep">/</span><span id="ammo-max">30</span></div>
+        <div class="reload"><i id="reload-bar"></i></div>
+        <div id="reload-hint"></div>
+      </div>
     </div>
-    <div id="ability"><div id="ability-fill"></div><kbd>E</kbd><div id="ability-name"></div><div id="ability-cd"></div></div>
+
     <div id="ping"></div>
     <div id="chat"><div id="chat-log"></div><input id="chat-input" class="hidden" maxlength="100" autocomplete="off" placeholder="Skriv… (Enter skickar)"></div>
     <div id="practice-stats"></div>
   </div>
 
+  <!-- gubbval (H) -->
+  <div id="hero" class="hidden">
+    <div class="hero-card">
+      <div class="hero-title">VÄLJ GUBBE <span>tryck 1–6 · H stänger</span></div>
+      <div id="hero-list"></div>
+      <div id="hero-note"></div>
+    </div>
+  </div>
+
+  <!-- ================= död / runda / poäng ================= -->
   <div id="death" class="hidden">
-    <div class="title">ELIMINERAD</div>
-    <div id="death-by"></div>
-    <div id="death-timer"></div>
-    <div id="death-weapon"></div>
-    <div class="hint">Tryck 1–6 för att byta gubbe</div>
+    <div class="d-card">
+      <div class="d-title">ELIMINERAD</div>
+      <div id="death-by"></div>
+      <div class="d-timer"><i id="death-bar"></i></div>
+      <div id="death-timer"></div>
+      <div class="d-swap">
+        <div class="d-hint">Nästa liv</div>
+        <div id="death-weapon"></div>
+      </div>
+    </div>
   </div>
 
   <div id="roundend" class="hidden">
-    <div class="title" id="re-title"></div>
-    <div id="re-next"></div>
-    <div id="re-xp"></div>
-    <div id="re-timer"></div>
+    <div class="re-card">
+      <div class="re-kicker">RUNDAN ÄR SLUT</div>
+      <div class="re-title" id="re-title"></div>
+      <div id="re-xp"></div>
+      <div id="re-next"></div>
+      <div id="re-timer"></div>
+    </div>
   </div>
 
   <div id="scoreboard" class="hidden">
     <div class="sb-head"><span id="sb-mode">FREE FOR ALL</span><span id="sb-limit"></span></div>
     <table>
-      <thead><tr><th>#</th><th>Spelare</th><th>Gubbe</th><th>Kills</th><th>Döda</th><th>K/D</th><th>Ping</th></tr></thead>
+      <thead><tr><th>#</th><th>Spelare</th><th>Gubbe</th><th>K</th><th>D</th><th>K/D</th><th>Ping</th></tr></thead>
       <tbody id="sb-body"></tbody>
     </table>
   </div>
 
+  <!-- ================= meny ================= -->
   <div id="menu">
-    <div class="panel">
-      <h1>MOGGADE</h1>
-      <div class="sub">FFA · GUN GAME · ARENA <span id="version"></span></div>
-      <div id="profile"></div>
-      <label class="field">
-        <span>Namn</span>
-        <input id="name" maxlength="16" placeholder="Ditt namn" autocomplete="off">
-      </label>
-      <div class="field">
-        <span>Färg</span>
-        <div id="colors"></div>
+    <header class="m-top">
+      <div class="brand">
+        <h1><span>LOCK</span>DOWN</h1>
+        <div class="sub">Arena-FPS i webbläsaren <span id="version"></span></div>
       </div>
-      <label class="field">
-        <span>Känslighet <em id="sens-val"></em></span>
-        <input type="range" id="sens" min="0.2" max="3" step="0.05">
-      </label>
-      <label class="field">
-        <span>Volym</span>
-        <input type="range" id="vol" min="0" max="1" step="0.05">
-      </label>
-      <details class="field more">
-        <summary>Fler inställningar</summary>
-        <label class="field">
-          <span>Synfält (FOV) <em id="fov-val"></em></span>
-          <input type="range" id="fov" min="65" max="110" step="1">
-        </label>
-        <div class="field">
-          <span>Sikte</span>
-          <div id="cross-colors"></div>
+      <nav class="tabs" id="tabs">
+        <button data-tab="play" class="on">Spela</button>
+        <button data-tab="profile">Profil</button>
+        <button data-tab="settings">Inställningar</button>
+        <button data-tab="top">Topplista</button>
+      </nav>
+      <div id="account"></div>
+    </header>
+
+    <main class="m-body">
+      <!-- Spela -->
+      <section class="tab on" data-tab="play">
+        <div class="play-grid">
+          <div class="col-modes">
+            <div id="identity"></div>
+            <div id="resume" class="hidden">
+              <div class="resume-title">MATCHEN PÅGÅR</div>
+              <button id="resume-btn" class="btn-primary">Fortsätt spela</button>
+              <button id="leave-btn" class="btn-ghost">Lämna matchen</button>
+            </div>
+            <div id="modes">
+              <button id="play" class="mode m-ffa">
+                <span class="m-tag">Alla mot alla</span>
+                <span class="m-name">Free for all</span>
+                <span class="m-desc" id="ffa-desc">Först till 25 kills vinner rundan.</span>
+                <span class="m-count" data-room="ffa"></span>
+              </button>
+              <button id="play-gg" class="mode m-gg">
+                <span class="m-tag">Klättra genom vapnen</span>
+                <span class="m-name">Gun Game</span>
+                <span class="m-desc">Nytt vapen efter varje nivå. Kniv-kill vinner.</span>
+                <span class="m-count" data-room="gungame"></span>
+              </button>
+              <button id="practice" class="mode m-practice">
+                <span class="m-tag">Bara du</span>
+                <span class="m-name">Övning</span>
+                <span class="m-desc">Skjutbana med dockor och bottar.</span>
+              </button>
+            </div>
+            <div id="status"></div>
+          </div>
+          <div class="col-chars">
+            <div class="h2">Välj gubbe <span>Byt i spelet med H</span></div>
+            <div id="weapons"></div>
+            <div id="weapon-note"></div>
+          </div>
         </div>
-        <label class="field">
-          <span>Siktets storlek <em id="cross-size-val"></em></span>
-          <input type="range" id="cross-size" min="0.5" max="2" step="0.1">
-        </label>
-      </details>
-      <button id="play">FREE FOR ALL</button>
-      <button id="play-gg">GUN GAME</button>
-      <button id="practice">ÖVNING</button>
-      <div id="status"></div>
-      <div id="weapon-note"></div>
-      <div class="controls">
-        <div><kbd>WASD</kbd> gå</div><div><kbd>SHIFT</kbd> spring</div>
-        <div><kbd>SPACE</kbd> hoppa</div><div><kbd>R</kbd> ladda om</div>
-        <div><kbd>VÄNSTER</kbd> skjut</div><div><kbd>HÖGER</kbd> sikta</div>
-        <div><kbd>CTRL</kbd> glid</div><div><kbd>E</kbd> förmåga</div>
-        <div><kbd>TAB</kbd> poäng</div><div><kbd>ESC</kbd> meny</div>
-        <div><kbd>T</kbd> chatt</div>
-      </div>
-    </div>
-    <div class="panel weapons-panel">
-      <div class="field"><span>Välj gubbe</span></div>
-      <div id="weapons"></div>
-    </div>
+      </section>
+
+      <!-- Profil -->
+      <section class="tab" data-tab="profile">
+        <div class="cards">
+          <div class="card"><h3>Din profil</h3><div id="profile"></div></div>
+          <div class="card">
+            <h3>Utseende</h3>
+            <label class="field">
+              <span>Namn</span>
+              <input id="name" class="input" maxlength="16" placeholder="Ditt namn" autocomplete="off">
+            </label>
+            <div class="field">
+              <span>Färg <em>fler låses upp med nivåer</em></span>
+              <div id="colors" class="swatches"></div>
+            </div>
+            <label class="field">
+              <span>Titel <em>syns på poängtavlan</em></span>
+              <select id="title" class="input"></select>
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <!-- Inställningar -->
+      <section class="tab" data-tab="settings">
+        <div class="cards">
+          <div class="card">
+            <h3>Spel</h3>
+            <label class="field">
+              <span>Känslighet <em id="sens-val"></em></span>
+              <input type="range" id="sens" min="0.2" max="3" step="0.05">
+            </label>
+            <label class="field">
+              <span>Känslighet när du siktar <em id="ads-sens-val"></em></span>
+              <input type="range" id="ads-sens" min="0.2" max="2" step="0.05">
+            </label>
+            <label class="field">
+              <span>Synfält (FOV) <em id="fov-val"></em></span>
+              <input type="range" id="fov" min="65" max="110" step="1">
+            </label>
+            <label class="field">
+              <span>Volym</span>
+              <input type="range" id="vol" min="0" max="1" step="0.05">
+            </label>
+            <label class="check">
+              <input type="checkbox" id="fullscreen">
+              <span>Helskärm när du spelar <small>Stoppar Ctrl+W och andra webbläsarknappar mitt i matchen.</small></span>
+            </label>
+          </div>
+          <div class="card">
+            <h3>Sikte</h3>
+            <div class="cross-preview"><div id="cross-preview" class="crosshair"><i class="t"></i><i class="b"></i><i class="l"></i><i class="r"></i><i class="c"></i></div></div>
+            <div class="field">
+              <span>Färg</span>
+              <div id="cross-colors" class="swatches"></div>
+            </div>
+            <label class="field">
+              <span>Storlek <em id="cross-size-val"></em></span>
+              <input type="range" id="cross-size" min="0.5" max="2" step="0.1">
+            </label>
+          </div>
+          <div class="card">
+            <h3>Kontroller</h3>
+            <div class="controls">
+              <div><kbd>W A S D</kbd>Gå</div>
+              <div><kbd>Shift</kbd>Spring</div>
+              <div><kbd>Space</kbd>Hoppa</div>
+              <div><kbd>Ctrl</kbd><kbd>C</kbd>Glid</div>
+              <div><kbd>Vänster</kbd>Skjut</div>
+              <div><kbd>Höger</kbd>Sikta</div>
+              <div><kbd>R</kbd>Ladda om</div>
+              <div><kbd>E</kbd>Förmåga</div>
+              <div><kbd>1</kbd>Vapen</div>
+              <div><kbd>2</kbd>Kniv</div>
+              <div><kbd>F</kbd>Inspektera vapnet</div>
+              <div><kbd>H</kbd>Byt gubbe</div>
+              <div><kbd>Tab</kbd>Poängtavla</div>
+              <div><kbd>T</kbd>Chatt</div>
+              <div><kbd>Esc</kbd>Meny</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Topplista -->
+      <section class="tab" data-tab="top">
+        <div class="cards one">
+          <div class="card">
+            <h3>Topplista</h3>
+            <ol id="top"></ol>
+            <p class="note">Bara spelare som har loggat in med Discord kommer med.</p>
+          </div>
+        </div>
+      </section>
+    </main>
   </div>
 
   <script type="module" src="js/main.js"></script>

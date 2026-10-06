@@ -2,24 +2,48 @@ import express from 'express';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+import crypto from 'node:crypto';
 import { WebSocketServer } from 'ws';
 import { MAPS } from '../public/js/maps.js';
 import { WEAPONS, GUNGAME, damageAt } from '../public/js/weapons.js';
-import { CHARACTERS, SLAM, STIM_HP, ARMOR } from '../public/js/characters.js';
+import { CHARACTERS, SLAM, ARMOR, ABILITY } from '../public/js/characters.js';
+import { RULES, readConfig, applyConfig } from '../public/js/config.js';
 import { makeSolids, rayBox, hitboxes, stuck, grounded, PLAYER } from '../public/js/physics.js';
+import { COLORS, XP, levelInfo, hasReward, cleanProfile } from '../public/js/progress.js';
 import { BOT_NAMES, newBrain, botSpawned, botThink, botHurt } from './bots.js';
+import { openDb } from './db.js';
+import { authRouter, discordEnabled, userIdFrom } from './auth.js';
+
+// Spelvärden från .env (skada, HP, förmågor, XP …) – måste köras innan något annat använder dem
+const CONFIG = readConfig(process.env);
+applyConfig(CONFIG.values);
+for (const w of CONFIG.warnings) console.log(`[inställning] ${w}`);
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const VERSION = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
+// Fingeravtryck av alla spelfiler: ändras en enda fil får alla filer en ny adress, så att webbläsaren
+// aldrig kör gammal kod från sin cache (även om man glömmer att höja versionen).
+const BUILD = (() => {
+  const h = crypto.createHash('sha1');
+  const walk = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else h.update(e.name).update(readFileSync(p));
+    }
+  };
+  walk(path.join(ROOT, 'public'));
+  return `${VERSION}-${h.digest('hex').slice(0, 10)}`;
+})();
 const PORT = Number(process.env.PORT) || 3000;
 const KILL_LIMIT = Number(process.env.KILL_LIMIT) || 25;
 const MAX_PLAYERS = Number(process.env.MAX_PLAYERS) || 16;
 const ROUND_MS = (Number(process.env.ROUND_MINUTES) || 8) * 60000;
+const DATA_DIR = process.env.DATA_DIR || path.join(ROOT, 'data');
+const SAVE_MS = 15000;
 
 const TICK_MS = 50;
-const RESPAWN_MS = 3000;
-const PROTECT_MS = 1500;
 const RANGE = 300;
 const INTERP_MS = 100;
 const HISTORY_MS = 1000;
@@ -27,16 +51,48 @@ const ROUND_PAUSE_MS = 10000;
 const BOT_COUNT = Number(process.env.BOTS ?? 0); // 0 = inga bottar som standard
 const BOT_SKILL = ['easy', 'normal', 'hard'].includes(process.env.BOT_SKILL) ? process.env.BOT_SKILL : 'normal';
 // Fusk-skydd: hur långt man får röra sig. Generöst så att dash, bunny hop och lagg aldrig slår till i onödan.
+// Gränserna växer med DASH_FART och SUPERHOPP_KRAFT i .env.
+const LEAP = ABILITY.leapPower;
 const MOVE = {
   speed: PLAYER.MAX_HS * 1.1, // m/s i sidled
   burst: 10, // extra meter som får "sparas" (paket som kommer i klump)
-  up: 15, // m/s uppåt (superhopp är 13.5)
-  upBurst: 5,
-  air: 3, // sekunder i luften utan att landa
+  up: Math.max(15, LEAP * 1.15), // m/s uppåt
+  upBurst: Math.max(5, (LEAP * LEAP) / (2 * PLAYER.GRAVITY) + 1),
+  air: Math.max(3, (2 * LEAP) / PLAYER.GRAVITY + 1.5), // sekunder i luften utan att landa
 };
+const KNIFE = WEAPONS.findIndex((w) => w.id === 'knife'); // plats 2 för alla
+const DRAW_MS = 200; // ta fram ett vapen innan man kan skjuta
 const MSG_PER_S = 120; // fler meddelanden än så slängs
 const KICK_PER_S = 400; // så många = kickas
-const COLORS = ['#ff4d6d', '#ffb703', '#4cc9f0', '#80ed99', '#c77dff', '#ff8fab', '#f77f00', '#e9ecef'];
+const MULTI = { 2: 'DUBBELKILL', 3: 'TRIPPELKILL', 4: 'MEGAKILL', 5: 'MONSTERKILL' };
+const START_COLORS = COLORS.filter((c) => hasReward('color', c, 1));
+
+// ---------- konton ----------
+const db = openDb(DATA_DIR);
+// Inloggade konton i minnet (samma objekt om man är inne i två flikar samtidigt)
+const accounts = new Map(); // användar-id -> { user, n }
+
+function acquireAccount(id) {
+  if (!id) return null;
+  let a = accounts.get(id);
+  if (!a) {
+    const user = db.getUser(id);
+    if (!user) return null;
+    a = { user, n: 0 };
+    accounts.set(id, a);
+  }
+  a.n++;
+  return a.user;
+}
+
+function releaseAccount(user) {
+  const a = accounts.get(user.id);
+  if (!a) return;
+  db.saveUser(user);
+  if (--a.n <= 0) accounts.delete(user.id);
+}
+
+const liveUser = (id) => accounts.get(id)?.user ?? db.getUser(id);
 
 // ---------- hjälpfunktioner ----------
 const r2 = (v) => Math.round(v * 100) / 100;
@@ -86,6 +142,7 @@ class Room {
     this.mapIndex = this.gungame ? 1 : 0;
     this.map = MAPS[this.mapIndex];
     this.solids = makeSolids(this.map.boxes);
+    this.resetPads();
     this.roundEndsAt = 0;
     this.roundStartedAt = Date.now();
   }
@@ -105,7 +162,8 @@ class Room {
       killLimit: KILL_LIMIT,
       list: [...this.players.values()].map((p) => ({
         id: p.id, name: p.name, color: p.color, k: p.kills, d: p.deaths, ping: p.bot ? 0 : Math.round(p.rtt),
-        w: p.weapon, c: p.char, lvl: p.level, bot: p.bot ? 1 : 0, r: p.rank,
+        w: p.weapon, c: p.char, lvl: p.level, bot: p.bot ? 1 : 0, r: p.bot ? p.rank : levelInfo(p.prof.xp).lvl,
+        ti: p.title ?? '', acc: p.user ? 1 : 0,
       })),
     });
   }
@@ -115,7 +173,8 @@ class Room {
     return this.gungame ? GUNGAME[p.level].w : CHARACTERS[p.char].weapon;
   }
 
-  join(ws, m) {
+  // user = inloggat konto (eller null för gäster, som skickar med sin egen profil från webbläsaren)
+  join(ws, m, user) {
     if (this.players.size >= MAX_PLAYERS) {
       ws.send(JSON.stringify({ t: 'full' }));
       ws.close();
@@ -123,21 +182,27 @@ class Room {
     }
     const id = nextId++;
     const ch = charIndex(m.c);
+    const prof = user ? user.prof : cleanProfile(m.prof);
+    const lvl = levelInfo(prof.xp).lvl;
     const p = {
-      id, ws,
-      name: cleanName(m.name, id),
-      rank: clamp(Math.floor(Number(m.rank) || 1), 1, 999),
-      color: COLORS.includes(m.color) ? m.color : COLORS[id % COLORS.length],
+      id, ws, user, prof, xpQ: [], killTimes: [],
+      name: cleanName(m.name || user?.name, id),
+      color: hasReward('color', m.color, lvl) ? m.color : START_COLORS[id % START_COLORS.length],
+      title: typeof m.title === 'string' && hasReward('title', m.title, lvl) ? m.title : '',
       char: ch, nextChar: ch, weapon: 0, maxHp: CHARACTERS[ch].hp, level: 0, levelKills: 0,
       lastAbility: 0, sl: 0, vote: -1,
       x: 0, y: 0, z: 0, yaw: 0, pitch: 0, mv: 0,
       hp: 0, alive: false, sp: 0, kills: 0, deaths: 0, streak: 0,
       lastShot: 0, rtt: 80, respawnAt: 0, protectUntil: 0, hist: [],
     };
-    p.weapon = this.weaponFor(p);
+    p.slot = 0;
+    p.ammoBy = {};
+    this.equip(p);
+    prof.games++;
+    if (user) user.sel = { name: m.name ? p.name : user.sel.name, color: p.color, title: p.title };
     this.players.set(id, p);
     send(p, {
-      t: 'welcome', id, mode: this.mode, killLimit: KILL_LIMIT, map: this.mapIndex,
+      t: 'welcome', id, mode: this.mode, killLimit: KILL_LIMIT, map: this.mapIndex, pads: this.padState(),
       left: this.roundLeft(), roundOver: this.roundEndsAt > 0,
     });
     if (!this.roundEndsAt) this.spawn(p);
@@ -171,7 +236,9 @@ class Room {
       // negativ rtt => lag-kompensationen spolar inte tillbaka för bottar
       lastShot: 0, rtt: -2 * INTERP_MS, respawnAt: 0, protectUntil: 0, hist: [],
     };
-    p.weapon = this.weaponFor(p);
+    p.slot = 0;
+    p.ammoBy = {};
+    this.equip(p);
     this.players.set(id, p);
     if (!this.roundEndsAt) this.spawn(p);
     this.sendRoster();
@@ -179,6 +246,7 @@ class Room {
 
   leave(p) {
     this.players.delete(p.id);
+    if (p.user) releaseAccount(p.user);
     this.broadcast({ t: 'leave', id: p.id });
     this.broadcast({ t: 'msg', text: `${p.name} lämnade` });
     this.sendRoster();
@@ -191,6 +259,7 @@ class Room {
       case 'loadout': p.nextChar = charIndex(m.c); break;
       case 'ab': this.onAbility(p); break;
       case 'rl': if (p.alive) this.reload(p, Date.now()); break;
+      case 'slot': this.onSlot(p, m); break;
       case 'chat': this.onChat(p, m); break;
       case 'vote': this.onVote(p, m); break;
       case 'pong': if (Number.isFinite(m.s)) p.rtt = clamp(Date.now() - m.s, 0, 1000); break;
@@ -211,7 +280,8 @@ class Room {
       }
     }
     p.char = p.nextChar;
-    p.weapon = this.weaponFor(p);
+    p.slot = 0;
+    this.equip(p);
     p.maxHp = CHARACTERS[p.char].hp;
     p.lastAbility = 0;
     p.armorUntil = 0;
@@ -223,22 +293,37 @@ class Room {
     p.alive = true;
     p.sp++;
     p.streak = 0;
-    p.protectUntil = Date.now() + PROTECT_MS;
+    p.protectUntil = Date.now() + RULES.protectMs;
     p.hist = [];
     this.resetMove(p);
-    this.resetAmmo(p);
+    p.ammoBy = {};
     if (p.bot) botSpawned(p);
-    send(p, { t: 'spawn', p: best, yaw: r3(p.yaw), sp: p.sp, c: p.char, hp: p.maxHp, w: p.weapon, lvl: p.level });
+    send(p, { t: 'spawn', p: best, yaw: r3(p.yaw), sp: p.sp, c: p.char, hp: p.maxHp, w: p.primary, lvl: p.level });
+    this.broadcast({ t: 'wp', id: p.id, w: p.weapon }, p);
   }
 
   resetMove(p) {
     p.chk = { at: Date.now(), budget: MOVE.burst, up: MOVE.upBurst, air: 0 };
   }
 
-  resetAmmo(p) {
-    p.ammo = WEAPONS[p.weapon].mag;
-    p.ammoW = p.weapon;
-    p.reloadUntil = 0;
+  // Plats 1 = huvudvapnet (gubbens, eller nivåns i Gun Game), plats 2 = kniven
+  equip(p) {
+    p.primary = this.weaponFor(p);
+    p.weapon = p.slot === 1 ? KNIFE : p.primary;
+  }
+
+  // Ammo sparas per vapen, så att man inte kan fylla magasinet genom att byta fram och tillbaka
+  ammoState(p) {
+    return (p.ammoBy[p.weapon] ??= { ammo: WEAPONS[p.weapon].mag, reloadUntil: 0 });
+  }
+
+  onSlot(p, m) {
+    const s = m.s === 1 ? 1 : 0;
+    if (!p.alive || s === p.slot) return;
+    p.slot = s;
+    this.equip(p);
+    p.drawUntil = Date.now() + DRAW_MS;
+    this.broadcast({ t: 'wp', id: p.id, w: p.weapon }, p);
   }
 
   // Skicka tillbaka spelaren till senast godkända position. sp räknas upp så att paket
@@ -249,6 +334,59 @@ class Room {
     this.resetMove(p);
     if (p.violations % 20 === 1) console.log(`[fusk?] ${p.name} (#${p.id}): ${why} (${p.violations} st)`);
     send(p, { t: 'pos', p: [r2(p.x), r2(p.y), r2(p.z)], sp: p.sp });
+  }
+
+  // ---------- hälsoplattor ----------
+  resetPads() {
+    this.pads = (this.map.pads ?? []).map((p) => ({ p, readyAt: 0 }));
+  }
+
+  // ms kvar tills varje platta är redo (0 = redo)
+  padState(now = Date.now()) {
+    return this.pads.map((d) => Math.max(0, d.readyAt - now));
+  }
+
+  // Står spelaren på en redo platta och saknar HP? Då läker den.
+  checkPads(p, now) {
+    if (p.hp >= p.maxHp) return;
+    for (let i = 0; i < this.pads.length; i++) {
+      const d = this.pads[i];
+      if (now < d.readyAt || Math.abs(p.y - d.p[1]) > 1 || Math.hypot(p.x - d.p[0], p.z - d.p[2]) > 1.1) continue;
+      p.hp = Math.min(p.maxHp, p.hp + RULES.padHp);
+      d.readyAt = now + RULES.padMs;
+      this.broadcast({ t: 'pads', s: this.padState(now), i, by: p.id });
+      return;
+    }
+  }
+
+  // ---------- XP (räknas bara här på servern) ----------
+  award(p, amount, label) {
+    if (!p.prof || amount <= 0) return;
+    p.prof.xp += Math.round(amount);
+    p.xpQ.push([Math.round(amount), label]);
+  }
+
+  // Skickar profilen + nya XP-poster till spelaren
+  sendProf(p) {
+    if (!p.prof) return;
+    send(p, { t: 'prof', prof: p.prof, xp: p.xpQ });
+    p.xpQ = [];
+  }
+
+  killXp(a, head) {
+    const pr = a.prof;
+    if (!pr) return;
+    const now = Date.now();
+    a.killTimes = a.killTimes.filter((t) => now - t < 4000);
+    a.killTimes.push(now);
+    pr.kills++;
+    if (head) pr.heads++;
+    pr.bestStreak = Math.max(pr.bestStreak, a.streak);
+    this.award(a, XP.kill, head ? 'HEADSHOT-KILL' : 'KILL');
+    if (head) this.award(a, XP.head, 'HEADSHOT');
+    const n = a.killTimes.length;
+    if (n >= 2) this.award(a, XP.multi * (n - 1), MULTI[Math.min(n, 5)]);
+    if (a.streak >= 3) this.award(a, XP.streak * a.streak, `SVIT ${a.streak}`);
   }
 
   posAt(p, t) {
@@ -303,9 +441,10 @@ class Room {
     let o = vec3(m.o);
     const dirs = (Array.isArray(m.d) && Array.isArray(m.d[0]) ? m.d : [m.d]).slice(0, w.pellets).map(vec3);
     if (!o || !dirs.length || dirs.some((d) => !d)) return;
-    if (p.ammoW !== p.weapon) this.resetAmmo(p);
-    if (now < p.reloadUntil) return;
-    if (!w.melee && --p.ammo <= 0) this.reload(p, now);
+    const am = this.ammoState(p);
+    if (now < am.reloadUntil || now < (p.drawUntil ?? 0)) return;
+    if (!w.melee && --am.ammo <= 0) this.reload(p, now);
+    if (p.prof && !w.melee) p.prof.shots++;
     p.lastShot = now;
     p.protectUntil = 0;
 
@@ -354,11 +493,10 @@ class Room {
   // Laddar om (lite kortare tid än på klienten, så att nätverksfladder inte slänger skott)
   reload(p, now) {
     const w = WEAPONS[p.weapon];
-    if (w.melee || now < p.reloadUntil) return;
-    if (p.ammoW !== p.weapon) this.resetAmmo(p);
-    if (p.ammo >= w.mag) return;
-    p.reloadUntil = now + w.reloadMs * 0.8;
-    p.ammo = w.mag;
+    const am = this.ammoState(p);
+    if (w.melee || now < am.reloadUntil || am.ammo >= w.mag) return;
+    am.reloadUntil = now + w.reloadMs * 0.8;
+    am.ammo = w.mag;
   }
 
   onAbility(p) {
@@ -367,7 +505,7 @@ class Room {
     if (!p.alive || this.roundEndsAt || now - p.lastAbility < ch.ability.cooldown * 0.85) return;
     p.lastAbility = now;
     if (ch.ability.id === 'stim') {
-      p.hp = Math.min(p.maxHp, p.hp + STIM_HP);
+      p.hp = Math.min(p.maxHp, p.hp + ABILITY.stimHp);
       this.broadcast({ t: 'fx', k: 'stim', id: p.id });
     } else if (ch.ability.id === 'armor') {
       p.armorUntil = now + ARMOR.ms;
@@ -411,6 +549,7 @@ class Room {
     if (now < (v.armorUntil ?? 0)) amount = Math.round(amount * ARMOR.factor);
     v.hp = Math.max(0, v.hp - amount);
     const kill = v.hp <= 0;
+    if (a.prof && a !== v) { a.prof.hits++; a.prof.dmg += amount; }
     send(a, { t: 'hc', head, kill, d: amount, v: v.id });
     if (v.bot && !kill && a !== v) botHurt(v, a, now);
     send(v, { t: 'hurt', hp: v.hp, from: [r2(a.x), r2(a.z)] });
@@ -421,9 +560,11 @@ class Room {
     v.alive = false;
     v.deaths++;
     v.streak = 0;
-    v.respawnAt = Date.now() + RESPAWN_MS;
+    v.respawnAt = Date.now() + RULES.respawnMs;
     a.kills++;
     a.streak++;
+    if (v.prof) v.prof.deaths++;
+    if (a !== v) this.killXp(a, head);
     this.broadcast({ t: 'kill', k: a.id, v: v.id, head, streak: a.streak, w: a.weapon, how });
 
     if (this.gungame) {
@@ -442,8 +583,10 @@ class Room {
       if (a.level < GUNGAME.length - 1 && a.levelKills >= GUNGAME[a.level].kills) {
         a.level++;
         a.levelKills = 0;
-        a.weapon = GUNGAME[a.level].w;
-        send(a, { t: 'level', lvl: a.level, w: a.weapon });
+        this.equip(a);
+        if (a.slot === 0) this.broadcast({ t: 'wp', id: a.id, w: a.weapon }, a);
+        send(a, { t: 'level', lvl: a.level, w: a.primary });
+        this.award(a, XP.level, 'NY NIVÅ');
         if (a.level === GUNGAME.length - 1) this.broadcast({ t: 'msg', text: `${a.name} har KNIVEN!` });
       }
     } else if (a.kills >= KILL_LIMIT) {
@@ -457,7 +600,14 @@ class Room {
   endRound(winner) {
     if (this.roundEndsAt) return;
     this.roundEndsAt = Date.now() + ROUND_PAUSE_MS;
-    for (const p of this.players.values()) p.vote = -1;
+    for (const p of this.players.values()) {
+      p.vote = -1;
+      if (!p.prof) continue;
+      if (p === winner) { p.prof.wins++; this.award(p, XP.win, 'VINST'); }
+      this.award(p, XP.round, 'RUNDA SPELAD');
+      this.sendProf(p); // före roundEnd, så att rundans XP hinner med i sammanfattningen
+      if (p.user) db.saveUser(p.user);
+    }
     this.broadcast({ t: 'roundEnd', winner: winner?.id ?? null, ms: ROUND_PAUSE_MS, maps: MAPS.map((m) => m.name), current: this.mapIndex });
   }
 
@@ -474,7 +624,8 @@ class Room {
     }
     this.map = MAPS[this.mapIndex];
     this.solids = makeSolids(this.map.boxes);
-    this.broadcast({ t: 'roundStart', map: this.mapIndex, left: this.roundLeft() });
+    this.resetPads();
+    this.broadcast({ t: 'roundStart', map: this.mapIndex, left: this.roundLeft(), pads: this.padState() });
     for (const p of this.players.values()) {
       p.kills = 0; p.deaths = 0; p.level = 0; p.levelKills = 0; p.alive = false;
       this.spawn(p);
@@ -501,11 +652,13 @@ class Room {
     if (now >= (this.nextBotCheck ?? 0)) { this.nextBotCheck = now + 1000; this.manageBots(); }
 
     for (const p of this.players.values()) {
+      if (p.xpQ?.length) this.sendProf(p);
       if (!p.alive) {
         if (!this.roundEndsAt && now >= p.respawnAt) this.spawn(p);
         continue;
       }
       if (p.bot) botThink(this, p, now, TICK_MS / 1000);
+      if (!this.roundEndsAt) this.checkPads(p, now);
       p.hist.push({ t: now, x: p.x, y: p.y, z: p.z, sl: p.sl });
       while (p.hist.length && now - p.hist[0].t > HISTORY_MS) p.hist.shift();
     }
@@ -525,17 +678,54 @@ const rooms = { ffa: new Room('ffa'), gungame: new Room('gungame') };
 
 // ---------- HTTP ----------
 const app = express();
+app.set('trust proxy', true); // Cloudflare-tunneln talar om att anslutningen är https
+app.use(express.json({ limit: '4kb' }));
+app.use(authRouter(db));
 app.get('/health', (_req, res) => res.send('ok'));
+
+// Vem är jag? Profil, val och om Discord-inloggning finns.
+app.get('/api/me', (req, res) => {
+  const id = userIdFrom(db, req);
+  const user = id ? liveUser(id) : null;
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({
+    discord: discordEnabled(),
+    user: user ? { name: user.name, avatar: user.avatar, prof: user.prof, sel: user.sel, canImport: !user.imported && user.prof.xp === 0 } : null,
+  });
+});
+
+// Engångsflytt av gäst-profilen (från webbläsaren) till ett nytt konto
+app.post('/api/import', (req, res) => {
+  const id = userIdFrom(db, req);
+  const user = id ? liveUser(id) : null;
+  if (!user || user.imported || user.prof.xp > 0) return res.status(400).json({ ok: false });
+  Object.assign(user.prof, cleanProfile(req.body?.prof));
+  user.imported = true;
+  db.saveUser(user);
+  res.json({ ok: true, prof: user.prof });
+});
+
+app.get('/api/top', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json(db.top(10));
+});
 app.get('/api/version', (_req, res) => res.json({ version: VERSION }));
-app.get('/api/rooms', (_req, res) => res.json(Object.fromEntries(Object.entries(rooms).map(([k, r]) => [k, r.players.size]))));
+app.get('/api/rooms', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  // bara riktiga spelare räknas, inte bottar
+  const count = (r) => [...r.players.values()].filter((p) => !p.bot).length;
+  res.json({ ...Object.fromEntries(Object.entries(rooms).map(([k, r]) => [k, count(r)])), killLimit: KILL_LIMIT });
+});
 // three.js byter aldrig innehåll (låst version) – får cachas länge.
 app.use('/vendor/three', express.static(path.join(ROOT, 'node_modules/three'), { maxAge: '30d', immutable: true }));
 
 // Startsidan pekar på /v/<version>/... så att varje ny version får helt nya filadresser.
 // Då kan webbläsaren aldrig blanda gamla och nya JS-filer (alla import './x.js' följer med versionen).
 const INDEX = readFileSync(path.join(ROOT, 'public/index.html'), 'utf8')
-  .replace('href="style.css"', `href="/v/${VERSION}/style.css"`)
-  .replace('src="js/main.js"', `src="/v/${VERSION}/js/main.js"`);
+  .replace('href="style.css"', `href="/v/${BUILD}/style.css"`)
+  .replace('src="js/main.js"', `src="/v/${BUILD}/js/main.js"`)
+  // samma spelvärden till webbläsaren (bara siffror med kända namn, så det är säkert att skriva in här)
+  .replace('<script type="importmap">', `<script>window.LOCKDOWN_CONFIG = ${JSON.stringify(CONFIG.values)};</script>\n  <script type="importmap">`);
 const sendIndex = (_req, res) => {
   res.setHeader('Cache-Control', 'no-cache, must-revalidate');
   res.setHeader('CDN-Cache-Control', 'no-store');
@@ -544,7 +734,7 @@ const sendIndex = (_req, res) => {
 };
 app.get(['/', '/index.html'], sendIndex);
 // Versionerade filer ändras aldrig – får cachas länge.
-app.use(`/v/${VERSION}`, express.static(path.join(ROOT, 'public'), { maxAge: '365d', immutable: true }));
+app.use(`/v/${BUILD}`, express.static(path.join(ROOT, 'public'), { maxAge: '365d', immutable: true }));
 // Spelets egna filer: webbläsaren ska alltid fråga efter senaste versionen, och Cloudflare ska inte spara dem.
 // Annars syns inte en ny version förrän cachen rensas.
 app.use(express.static(path.join(ROOT, 'public'), {
@@ -558,8 +748,9 @@ app.use(express.static(path.join(ROOT, 'public'), {
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 8192 });
 
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
   let p = null, room = null;
+  let user = acquireAccount(userIdFrom(db, req));
   let second = 0, count = 0;
 
   ws.on('message', (raw) => {
@@ -573,7 +764,8 @@ wss.on('connection', (ws) => {
     if (!p) {
       if (m.t !== 'join') return;
       room = rooms[m.mode] ?? rooms.ffa;
-      p = room.join(ws, m);
+      p = room.join(ws, m, user);
+      if (p) user = null; // ägs nu av spelaren och släpps i leave()
       return;
     }
     room.message(p, m);
@@ -581,6 +773,7 @@ wss.on('connection', (ws) => {
 
   ws.on('close', () => {
     if (p) room.leave(p);
+    if (user) releaseAccount(user);
   });
 });
 
@@ -589,7 +782,16 @@ setInterval(() => {
   for (const r of Object.values(rooms)) {
     r.broadcast({ t: 'ping', s: Date.now() });
     r.sendRoster();
+    for (const p of r.players.values()) r.sendProf(p); // statistik (skott, träffar) uppdateras löpande
   }
 }, 2000);
+// spara inloggade konton regelbundet, och när servern stängs
+setInterval(() => { for (const { user } of accounts.values()) db.saveUser(user); }, SAVE_MS);
+for (const sig of ['SIGTERM', 'SIGINT']) {
+  process.on(sig, () => {
+    for (const { user } of accounts.values()) db.saveUser(user);
+    process.exit(0);
+  });
+}
 
-server.listen(PORT, () => console.log(`MOGGADE v${VERSION} kör på port ${PORT} (FFA + Gun Game, kill-gräns ${KILL_LIMIT}, ${ROUND_MS / 60000} min/runda)`));
+server.listen(PORT, () => console.log(`LOCKDOWN v${VERSION} kör på port ${PORT} (FFA + Gun Game, kill-gräns ${KILL_LIMIT}, ${ROUND_MS / 60000} min/runda, Discord-inloggning ${discordEnabled() ? 'på' : 'av'})`));

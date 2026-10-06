@@ -3,12 +3,21 @@ services:
     image: ${APP_IMAGE}:${APP_VERSION}
     container_name: moggade-game
     restart: unless-stopped
+    # alla spelvärden i .env (skada, HP, förmågor, XP …) följer med in
+    env_file: .env
     environment:
       - PORT=3000
       - KILL_LIMIT=${KILL_LIMIT:-25}
       - MAX_PLAYERS=${MAX_PLAYERS:-16}
       - BOTS=${BOTS:-0}
       - BOT_SKILL=${BOT_SKILL:-normal}
+      # Discord-inloggning (se README). Lämna tomt för att bara ha gäster.
+      - DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID:-}
+      - DISCORD_CLIENT_SECRET=${DISCORD_CLIENT_SECRET:-}
+      - PUBLIC_URL=${PUBLIC_URL:-}
+    volumes:
+      # konton och statistik
+      - lockdown-data:/data
     ports:
       # Bara för att testa på hemnätverket (http://NAS-IP:3000). Kan tas bort om du bara vill köra via tunneln.
       - "${GAME_PORT:-3000}:3000"
@@ -22,3 +31,6 @@ services:
       - TUNNEL_TOKEN=${TUNNEL_TOKEN}
     depends_on:
       - game
+
+volumes:
+  lockdown-data:
