@@ -2,6 +2,7 @@ import express from 'express';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
 import { WebSocketServer } from 'ws';
 import { MAPS } from '../public/js/maps.js';
 import { WEAPONS, GUNGAME, damageAt } from '../public/js/weapons.js';
@@ -10,6 +11,7 @@ import { makeSolids, rayBox, hitboxes, PLAYER } from '../public/js/physics.js';
 import { BOT_NAMES, newBrain, botSpawned, botThink, botHurt } from './bots.js';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+const VERSION = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
 const PORT = Number(process.env.PORT) || 3000;
 const KILL_LIMIT = Number(process.env.KILL_LIMIT) || 25;
 const MAX_PLAYERS = Number(process.env.MAX_PLAYERS) || 16;
@@ -22,7 +24,7 @@ const RANGE = 300;
 const INTERP_MS = 100;
 const HISTORY_MS = 1000;
 const ROUND_PAUSE_MS = 10000;
-const BOT_COUNT = Number(process.env.BOTS ?? 3);
+const BOT_COUNT = Number(process.env.BOTS ?? 0); // 0 = inga bottar som standard
 const BOT_SKILL = ['easy', 'normal', 'hard'].includes(process.env.BOT_SKILL) ? process.env.BOT_SKILL : 'normal';
 const COLORS = ['#ff4d6d', '#ffb703', '#4cc9f0', '#80ed99', '#c77dff', '#ff8fab', '#f77f00', '#e9ecef'];
 
@@ -435,6 +437,7 @@ const rooms = { ffa: new Room('ffa'), gungame: new Room('gungame') };
 // ---------- HTTP ----------
 const app = express();
 app.get('/health', (_req, res) => res.send('ok'));
+app.get('/api/version', (_req, res) => res.json({ version: VERSION }));
 app.get('/api/rooms', (_req, res) => res.json(Object.fromEntries(Object.entries(rooms).map(([k, r]) => [k, r.players.size]))));
 // three.js byter aldrig innehåll (låst version) – får cachas länge.
 app.use('/vendor/three', express.static(path.join(ROOT, 'node_modules/three'), { maxAge: '30d', immutable: true }));
@@ -480,4 +483,4 @@ setInterval(() => {
   }
 }, 2000);
 
-server.listen(PORT, () => console.log(`MOGGADE kör på port ${PORT} (FFA + Gun Game, kill-gräns ${KILL_LIMIT}, ${ROUND_MS / 60000} min/runda)`));
+server.listen(PORT, () => console.log(`MOGGADE v${VERSION} kör på port ${PORT} (FFA + Gun Game, kill-gräns ${KILL_LIMIT}, ${ROUND_MS / 60000} min/runda)`));

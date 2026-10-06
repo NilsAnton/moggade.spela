@@ -153,6 +153,7 @@ function renderProfile() {
   });
 }
 renderProfile();
+fetch('/api/version').then((r) => r.json()).then((v) => { $('version').textContent = `v${v.version}`; }).catch(() => {});
 
 function giveXp(amount, label) {
   if (practice || amount <= 0) return;

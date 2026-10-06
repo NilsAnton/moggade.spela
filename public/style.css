@@ -494,3 +494,9 @@ td .rk {
   #play { padding: 12px; margin-top: 4px; }
   .controls { display: none; }
 }
+
+#version {
+  margin-left: 6px; padding: 1px 7px; border: 1px solid var(--line); border-radius: 4px;
+  font-size: 11px; letter-spacing: 1px; color: var(--accent); vertical-align: middle;
+}
+#version:empty { display: none; }

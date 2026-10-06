@@ -7,7 +7,7 @@ services:
       - PORT=3000
       - KILL_LIMIT=${KILL_LIMIT:-25}
       - MAX_PLAYERS=${MAX_PLAYERS:-16}
-      - BOTS=${BOTS:-3}
+      - BOTS=${BOTS:-0}
       - BOT_SKILL=${BOT_SKILL:-normal}
     ports:
       # Bara för att testa på hemnätverket (http://NAS-IP:3000). Kan tas bort om du bara vill köra via tunneln.
