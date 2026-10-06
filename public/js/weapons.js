@@ -25,15 +25,15 @@ export const WEAPONS = [
     stats: { dmg: 1, rate: 0.1, range: 1, mobility: 0.35 },
   },
   {
-    id: 'knife', name: 'KNIV', desc: 'Ett hugg räcker.',
-    auto: false, fireMs: 450, mag: Infinity, reloadMs: 0, body: 100, head: 100, pellets: 1, melee: true, range: 2.6,
+    id: 'knife', name: 'KNIV', desc: 'Snabba hugg på nära håll. Alla har den på 2.',
+    auto: false, fireMs: 450, mag: Infinity, reloadMs: 0, body: 50, head: 50, pellets: 1, melee: true, range: 2.6,
     hip: 0, adsSpread: 0, moveSpread: 0, kick: 0.01, adsFov: 75, speed: 1.1, falloff: 0,
     stats: { dmg: 1, rate: 0.4, range: 0, mobility: 1 },
   },
   {
     id: 'dmr', name: 'DMR', desc: 'Halvautomatisk precision. Två skott i huvudet.',
     auto: false, fireMs: 240, mag: 12, reloadMs: 2000, body: 38, head: 85, pellets: 1,
-    hip: 0.03, adsSpread: 0.0008, moveSpread: 0.03, kick: 0.02, adsFov: 42, speed: 0.97, falloff: 0,
+    hip: 0.03, adsSpread: 0.0008, moveSpread: 0.03, kick: 0.02, adsFov: 32, speed: 0.97, falloff: 0, scope: 'dmr',
     stats: { dmg: 0.75, rate: 0.35, range: 0.9, mobility: 0.55 },
   },
   {

@@ -144,6 +144,13 @@ export class Sound {
     this.noiseHit(out, t + 0.25, 0.06, { type: 'bandpass', f0: 2600, f1: 2000, q: 3 });
   }
 
+  chat() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime, out = this.out(0.15);
+    this.tone(out, t, 0.06, { type: 'sine', f0: 880, g0: 0.4 });
+    this.tone(out, t + 0.07, 0.08, { type: 'sine', f0: 1320, g0: 0.3 });
+  }
+
   hit() {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;

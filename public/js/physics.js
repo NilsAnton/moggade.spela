@@ -1,6 +1,7 @@
 // Delas mellan klient och server – ingen three.js här, bara arrayer [x, y, z].
 
-export const PLAYER = { R: 0.4, H: 1.8, EYE: 1.65, STEP: 0.55, GRAVITY: 22, JUMP: 7.6 };
+// MAX_HS = högsta tillåtna fart i sidled (dash, bunny hop och glidhopp kan aldrig gå över den)
+export const PLAYER = { R: 0.4, H: 1.8, EYE: 1.65, STEP: 0.55, GRAVITY: 22, JUMP: 7.6, MAX_HS: 24 };
 export const HITBOX = { BODY_R: 0.38, BODY_H: 1.45, HEAD_R: 0.25, HEAD_TOP: 1.9 };
 
 export function makeSolids(map) {
@@ -22,6 +23,24 @@ export function collide(solids, p) {
     }
   }
   return best;
+}
+
+// Som collide, men med lite marginal – positioner skickas avrundade till 0.01 över nätet.
+export function stuck(solids, p) {
+  const R = PLAYER.R - 0.05, y = p[1] + 0.05, H = PLAYER.H - 0.1;
+  return solids.some((b) =>
+    p[0] + R > b.min[0] && p[0] - R < b.max[0] &&
+    p[2] + R > b.min[2] && p[2] - R < b.max[2] &&
+    y + H > b.min[1] && y < b.max[1]);
+}
+
+// Står fötterna på något (golv, låda, tak)?
+export function grounded(solids, p) {
+  const R = PLAYER.R;
+  return solids.some((b) =>
+    p[0] + R > b.min[0] && p[0] - R < b.max[0] &&
+    p[2] + R > b.min[2] && p[2] - R < b.max[2] &&
+    p[1] >= b.max[1] - 0.05 && p[1] <= b.max[1] + 0.15);
 }
 
 // body: { p: [x,y,z] (fötter), v: [x,y,z], ground: bool }
