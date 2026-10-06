@@ -436,8 +436,17 @@ const rooms = { ffa: new Room('ffa'), gungame: new Room('gungame') };
 const app = express();
 app.get('/health', (_req, res) => res.send('ok'));
 app.get('/api/rooms', (_req, res) => res.json(Object.fromEntries(Object.entries(rooms).map(([k, r]) => [k, r.players.size]))));
-app.use('/vendor/three', express.static(path.join(ROOT, 'node_modules/three')));
-app.use(express.static(path.join(ROOT, 'public')));
+// three.js byter aldrig innehåll (låst version) – får cachas länge.
+app.use('/vendor/three', express.static(path.join(ROOT, 'node_modules/three'), { maxAge: '30d', immutable: true }));
+// Spelets egna filer: webbläsaren ska alltid fråga efter senaste versionen, och Cloudflare ska inte spara dem.
+// Annars syns inte en ny version förrän cachen rensas.
+app.use(express.static(path.join(ROOT, 'public'), {
+  setHeaders(res) {
+    res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    res.setHeader('CDN-Cache-Control', 'no-store');
+    res.setHeader('Cloudflare-CDN-Cache-Control', 'no-store');
+  },
+}));
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 8192 });
