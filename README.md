@@ -36,17 +36,19 @@ Nu kan ni spela på `https://fps.dindomän.se`.
 På hemnätverket går det även att gå direkt till `http://NAS-IP:3000`.
 
 ### Uppdatera efter ändringar
-Kopiera in de nya filerna. Gå sedan till Container Manager → Projekt → moggade → **Åtgärd → Bygg**. Via SSH kan du i stället köra:
+1. Kopiera in de nya filerna till mappen på NAS:en.
+2. Öppna `.env` (med Text Editor i DSM) och höj `APP_VERSION`, t.ex. `1.0.0` → `1.0.1`.
+3. Container Manager → Projekt → moggade → **Åtgärd → Bygg**.
 
-```bash
-sudo docker compose up -d --build
-```
+**Ångra en uppdatering:** sätt tillbaka `APP_VERSION` till den gamla versionen och starta projektet igen. Den gamla versionen finns kvar på NAS:en, så den behöver inte byggas om.
+
+Via SSH: `./update.sh 1.0.1`
 
 ## Filer
 | Fil | Vad |
 |---|---|
 | `server/server.js` | Spelserver: anslutningar, träffar, kills, respawn, rundor |
-| `public/js/map.js` | Banan (delas av server och klient) |
+| `public/js/maps.js` | Banan (delas av server och klient) |
 | `public/js/physics.js` | Rörelse, kollision och träffboxar (delas) |
 | `public/js/main.js` | Klienten: input, nätverk, kamera, HUD |
 | `public/js/world.js` | Grafik: texturer, himmel, ljus, stadssiluett |
