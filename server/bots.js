@@ -1,7 +1,7 @@
 // Serverbottar – spelar som riktiga spelare: samma fysik, samma vapen, samma regler.
 import { moveBody, raycastWorld, PLAYER } from '../public/js/physics.js';
 import { WEAPONS } from '../public/js/weapons.js';
-import { CHARACTERS } from '../public/js/characters.js';
+import { CHARACTERS, RADAR_MS } from '../public/js/characters.js';
 
 export const BOT_NAMES = ['Kalle', 'Stina', 'Bosse', 'Greta', 'Måns', 'Tuva', 'Sixten', 'Majken'];
 
@@ -103,6 +103,16 @@ export function botThink(room, p, now, dt) {
     wz = fz * fwd + fx * b.strafe * 0.8;
     if (b.body.ground && Math.random() < dt * 0.25) b.body.v[1] = PLAYER.JUMP;
   } else {
+    if (now < (b.radarUntil ?? 0)) {
+      // radar: gå mot närmaste fiende även om den inte syns
+      let near = null, nd = Infinity;
+      for (const q of room.players.values()) {
+        if (q === p || !q.alive) continue;
+        const d = Math.hypot(q.x - p.x, q.z - p.z);
+        if (d < nd) { near = q; nd = d; }
+      }
+      if (near) { b.goal = [near.x, near.y, near.z]; b.goalUntil = now + 1500; }
+    }
     if (!b.goal || now > b.goalUntil || Math.hypot(b.goal[0] - p.x, b.goal[2] - p.z) < 1.5) {
       b.goal = room.map.spawns[Math.floor(Math.random() * room.map.spawns.length)];
       b.goalUntil = now + 9000;
@@ -183,6 +193,9 @@ function useAbility(room, p, b, ch, now) {
   else if (ab.id === 'dash') {
     use = t && (dist > 10 || now - b.hurtAt < 300) && Math.random() < 0.02;
     if (use) { const d = dist || 1; b.body.v[0] = ((t.x - p.x) / d) * 18; b.body.v[2] = ((t.z - p.z) / d) * 18; }
+  } else if (ab.id === 'radar') {
+    use = !t && Math.random() < 0.01;
+    if (use) b.radarUntil = now + RADAR_MS;
   } else if (ab.id === 'leap') {
     use = b.body.ground && !t && Math.random() < 0.004;
     if (use) b.body.v[1] = 13.5;

@@ -7,7 +7,7 @@ import { WebSocketServer } from 'ws';
 import { MAPS } from '../public/js/maps.js';
 import { WEAPONS, GUNGAME, damageAt } from '../public/js/weapons.js';
 import { CHARACTERS, SLAM, STIM_HP, ARMOR } from '../public/js/characters.js';
-import { makeSolids, rayBox, hitboxes, PLAYER } from '../public/js/physics.js';
+import { makeSolids, rayBox, hitboxes, stuck, grounded, PLAYER } from '../public/js/physics.js';
 import { BOT_NAMES, newBrain, botSpawned, botThink, botHurt } from './bots.js';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -26,6 +26,16 @@ const HISTORY_MS = 1000;
 const ROUND_PAUSE_MS = 10000;
 const BOT_COUNT = Number(process.env.BOTS ?? 0); // 0 = inga bottar som standard
 const BOT_SKILL = ['easy', 'normal', 'hard'].includes(process.env.BOT_SKILL) ? process.env.BOT_SKILL : 'normal';
+// Fusk-skydd: hur långt man får röra sig. Generöst så att dash, bunny hop och lagg aldrig slår till i onödan.
+const MOVE = {
+  speed: PLAYER.MAX_HS * 1.1, // m/s i sidled
+  burst: 10, // extra meter som får "sparas" (paket som kommer i klump)
+  up: 15, // m/s uppåt (superhopp är 13.5)
+  upBurst: 5,
+  air: 3, // sekunder i luften utan att landa
+};
+const MSG_PER_S = 120; // fler meddelanden än så slängs
+const KICK_PER_S = 400; // så många = kickas
 const COLORS = ['#ff4d6d', '#ffb703', '#4cc9f0', '#80ed99', '#c77dff', '#ff8fab', '#f77f00', '#e9ecef'];
 
 // ---------- hjälpfunktioner ----------
@@ -42,6 +52,22 @@ function vec3(a) {
   if (!Array.isArray(a) || a.length !== 3) return null;
   const v = a.map(Number);
   return v.every(Number.isFinite) ? v : null;
+}
+
+// Går sträckan a -> b (i midjehöjd) rakt igenom en vägg? Lådorna krymps lite så att hörn inte räknas.
+function throughWall(solids, a, b) {
+  const o = [a[0], a[1] + 1, a[2]];
+  const d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+  const len = Math.hypot(d[0], d[1], d[2]);
+  if (len < 0.3) return false;
+  for (let i = 0; i < 3; i++) d[i] /= len;
+  for (const box of solids) {
+    const sx = Math.min(0.2, (box.max[0] - box.min[0]) / 2 - 0.05);
+    const sz = Math.min(0.2, (box.max[2] - box.min[2]) / 2 - 0.05);
+    const h = rayBox(o, d, [box.min[0] + sx, box.min[1], box.min[2] + sz], [box.max[0] - sx, box.max[1], box.max[2] - sz]);
+    if (h && h.t < len) return true;
+  }
+  return false;
 }
 
 function cleanName(n, id) {
@@ -164,6 +190,8 @@ class Room {
       case 'sh': this.onShoot(p, m); break;
       case 'loadout': p.nextChar = charIndex(m.c); break;
       case 'ab': this.onAbility(p); break;
+      case 'rl': if (p.alive) this.reload(p, Date.now()); break;
+      case 'chat': this.onChat(p, m); break;
       case 'vote': this.onVote(p, m); break;
       case 'pong': if (Number.isFinite(m.s)) p.rtt = clamp(Date.now() - m.s, 0, 1000); break;
     }
@@ -197,8 +225,30 @@ class Room {
     p.streak = 0;
     p.protectUntil = Date.now() + PROTECT_MS;
     p.hist = [];
+    this.resetMove(p);
+    this.resetAmmo(p);
     if (p.bot) botSpawned(p);
     send(p, { t: 'spawn', p: best, yaw: r3(p.yaw), sp: p.sp, c: p.char, hp: p.maxHp, w: p.weapon, lvl: p.level });
+  }
+
+  resetMove(p) {
+    p.chk = { at: Date.now(), budget: MOVE.burst, up: MOVE.upBurst, air: 0 };
+  }
+
+  resetAmmo(p) {
+    p.ammo = WEAPONS[p.weapon].mag;
+    p.ammoW = p.weapon;
+    p.reloadUntil = 0;
+  }
+
+  // Skicka tillbaka spelaren till senast godkända position. sp räknas upp så att paket
+  // som redan är på väg (med den gamla positionen) ignoreras.
+  correct(p, why) {
+    p.sp++;
+    p.violations = (p.violations ?? 0) + 1;
+    this.resetMove(p);
+    if (p.violations % 20 === 1) console.log(`[fusk?] ${p.name} (#${p.id}): ${why} (${p.violations} st)`);
+    send(p, { t: 'pos', p: [r2(p.x), r2(p.y), r2(p.z)], sp: p.sp });
   }
 
   posAt(p, t) {
@@ -220,9 +270,26 @@ class Room {
     const pos = vec3(m.p);
     if (!pos) return;
     const b = this.map.bounds;
-    p.x = clamp(pos[0], -b, b);
-    p.y = clamp(pos[1], -1, 30);
-    p.z = clamp(pos[2], -b, b);
+    const next = [clamp(pos[0], -b, b), clamp(pos[1], -1, 30), clamp(pos[2], -b, b)];
+
+    // Rimlighetskoll: fart, hopphöjd, väggar och svävande
+    const c = p.chk, now = Date.now();
+    const dt = Math.min((now - c.at) / 1000, 1);
+    c.at = now;
+    c.budget = Math.min(MOVE.burst, c.budget + dt * MOVE.speed);
+    c.up = Math.min(MOVE.upBurst, c.up + dt * MOVE.up);
+    c.budget -= Math.hypot(next[0] - p.x, next[2] - p.z);
+    c.up -= Math.max(0, next[1] - p.y);
+    c.air = grounded(this.solids, next) ? 0 : c.air + Math.min(dt, 0.1);
+    let bad = null;
+    if (c.budget < 0) bad = 'för snabb';
+    else if (c.up < 0) bad = 'för högt hopp';
+    else if (c.air > MOVE.air) bad = 'svävar';
+    else if (stuck(this.solids, next)) bad = 'inne i vägg';
+    else if (throughWall(this.solids, [p.x, p.y, p.z], next)) bad = 'genom vägg';
+    if (bad) { this.correct(p, bad); return; }
+
+    [p.x, p.y, p.z] = next;
     p.yaw = Number(m.y) || 0;
     p.pitch = clamp(Number(m.x) || 0, -1.6, 1.6);
     p.mv = m.m ? 1 : 0;
@@ -236,6 +303,9 @@ class Room {
     let o = vec3(m.o);
     const dirs = (Array.isArray(m.d) && Array.isArray(m.d[0]) ? m.d : [m.d]).slice(0, w.pellets).map(vec3);
     if (!o || !dirs.length || dirs.some((d) => !d)) return;
+    if (p.ammoW !== p.weapon) this.resetAmmo(p);
+    if (now < p.reloadUntil) return;
+    if (!w.melee && --p.ammo <= 0) this.reload(p, now);
     p.lastShot = now;
     p.protectUntil = 0;
 
@@ -281,6 +351,16 @@ class Room {
     for (const [victim, { amount, head }] of dmg) this.damage(victim, p, amount, head, w.melee ? 'knife' : undefined);
   }
 
+  // Laddar om (lite kortare tid än på klienten, så att nätverksfladder inte slänger skott)
+  reload(p, now) {
+    const w = WEAPONS[p.weapon];
+    if (w.melee || now < p.reloadUntil) return;
+    if (p.ammoW !== p.weapon) this.resetAmmo(p);
+    if (p.ammo >= w.mag) return;
+    p.reloadUntil = now + w.reloadMs * 0.8;
+    p.ammo = w.mag;
+  }
+
   onAbility(p) {
     const ch = CHARACTERS[p.char];
     const now = Date.now();
@@ -302,6 +382,15 @@ class Room {
         this.damage(q, p, Math.round(SLAM.damage * (1 - (d / SLAM.radius) * 0.5)), false, 'slam');
       }
     }
+  }
+
+  onChat(p, m) {
+    const now = Date.now();
+    if (now - (p.lastChat ?? 0) < 700) return;
+    const text = String(m.text ?? '').replace(/[\p{C}]/gu, '').trim().slice(0, 100);
+    if (!text) return;
+    p.lastChat = now;
+    this.broadcast({ t: 'chat', id: p.id, text });
   }
 
   onVote(p, m) {
@@ -344,13 +433,13 @@ class Room {
         v.levelKills = 0;
         send(v, { t: 'level', lvl: v.level, down: true });
       }
-      if (a.level === GUNGAME.length - 1) {
+      if (a.level === GUNGAME.length - 1 && how === 'knife') {
         this.sendRoster();
         this.endRound(a);
         return;
       }
       a.levelKills++;
-      if (a.levelKills >= GUNGAME[a.level].kills) {
+      if (a.level < GUNGAME.length - 1 && a.levelKills >= GUNGAME[a.level].kills) {
         a.level++;
         a.levelKills = 0;
         a.weapon = GUNGAME[a.level].w;
@@ -471,8 +560,13 @@ const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 8192 });
 
 wss.on('connection', (ws) => {
   let p = null, room = null;
+  let second = 0, count = 0;
 
   ws.on('message', (raw) => {
+    const s = Math.floor(Date.now() / 1000);
+    if (s !== second) { second = s; count = 0; }
+    if (++count > KICK_PER_S) { ws.close(); return; }
+    if (count > MSG_PER_S) return;
     let m;
     try { m = JSON.parse(raw); } catch { return; }
     if (!m || typeof m !== 'object') return;

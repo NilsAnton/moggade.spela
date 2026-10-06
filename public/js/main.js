@@ -27,7 +27,11 @@ const r3 = (v) => Math.round(v * 1000) / 1000;
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 // ---------- inställningar ----------
-const settings = { name: '', color: COLORS[Math.floor(Math.random() * COLORS.length)], sens: 1, vol: 0.7, char: 0 };
+const CROSS_COLORS = ['#ffffff', '#19e3ff', '#80ed99', '#ffd23f', '#ff4d6d', '#ff2bd6'];
+const settings = {
+  name: '', color: COLORS[Math.floor(Math.random() * COLORS.length)], sens: 1, vol: 0.7, char: 0,
+  fov: 75, cross: CROSS_COLORS[0], crossSize: 1,
+};
 try { Object.assign(settings, JSON.parse(localStorage.getItem('moggade') || '{}')); } catch {}
 if (!CHARACTERS[settings.char]) settings.char = 0;
 const saveSettings = () => { try { localStorage.setItem('moggade', JSON.stringify(settings)); } catch {} };
@@ -105,8 +109,29 @@ const keys = {};
 $('name').value = settings.name;
 $('sens').value = settings.sens;
 $('vol').value = settings.vol;
+$('fov').value = settings.fov;
+$('cross-size').value = settings.crossSize;
 const sensLabel = () => { $('sens-val').textContent = Number(settings.sens).toFixed(2); };
 sensLabel();
+const fovLabel = () => { $('fov-val').textContent = `${settings.fov}°`; };
+fovLabel();
+function applyCrosshair() {
+  const ch = $('crosshair');
+  ch.style.setProperty('--cross', settings.cross);
+  ch.style.setProperty('--size', settings.crossSize);
+  $('cross-size-val').textContent = `${Math.round(settings.crossSize * 100)}%`;
+  document.querySelectorAll('.cross-swatch').forEach((b) => b.classList.toggle('active', b.dataset.c === settings.cross));
+}
+CROSS_COLORS.forEach((c) => {
+  const b = document.createElement('button');
+  b.className = 'swatch cross-swatch';
+  b.style.background = c;
+  b.dataset.c = c;
+  b.onclick = () => { settings.cross = c; applyCrosshair(); saveSettings(); };
+  $('cross-colors').appendChild(b);
+});
+if (!CROSS_COLORS.includes(settings.cross)) settings.cross = CROSS_COLORS[0];
+applyCrosshair();
 const myLevel0 = () => levelInfo().lvl;
 if (COLORS.indexOf(settings.color) < 0 || COLOR_UNLOCK[COLORS.indexOf(settings.color)] > myLevel0()) settings.color = COLORS[0];
 COLORS.forEach((c, ci) => {
@@ -210,6 +235,8 @@ function selectChar(i) {
 
 $('sens').oninput = (e) => { settings.sens = Number(e.target.value); sensLabel(); saveSettings(); };
 $('vol').oninput = (e) => { settings.vol = Number(e.target.value); sound.setVolume(settings.vol); saveSettings(); };
+$('fov').oninput = (e) => { settings.fov = Number(e.target.value); fovLabel(); saveSettings(); };
+$('cross-size').oninput = (e) => { settings.crossSize = Number(e.target.value); applyCrosshair(); saveSettings(); };
 
 let mode = 'ffa';
 function playOnline(m) {
@@ -254,8 +281,13 @@ function showMenu(show) {
 
 // ---------- input ----------
 addEventListener('keydown', (e) => {
+  if (chatOpen) {
+    if (e.code === 'Enter') { e.preventDefault(); closeChat(true); }
+    return;
+  }
   if (e.code === 'Tab') { e.preventDefault(); if (playing) showScoreboard(true); return; }
   if (!locked) return;
+  if ((e.code === 'KeyT' || e.code === 'Enter') && ws && !practice && !e.repeat) { e.preventDefault(); openChat(); return; }
   if (e.code === 'Space' && !e.repeat) jumpQueued = true;
   if ((e.code === 'ControlLeft' || e.code === 'KeyC') && !e.repeat) startSlide();
   if (e.code === 'KeyE' && !e.repeat) useAbility();
@@ -276,7 +308,7 @@ addEventListener('keyup', (e) => {
   if (e.code === 'Tab') showScoreboard(roundOver);
 });
 addEventListener('mousedown', (e) => {
-  if (!locked) return;
+  if (!locked || chatOpen) return;
   if (e.button === 0) firing = true;
   if (e.button === 2) ads = true;
 });
@@ -287,16 +319,48 @@ addEventListener('mouseup', (e) => {
 addEventListener('contextmenu', (e) => e.preventDefault());
 addEventListener('mousemove', (e) => {
   if (!locked || !me.alive) return;
-  const zoom = camera.fov / 75;
+  const zoom = camera.fov / settings.fov;
   const s = 0.0022 * settings.sens * (ads ? Math.max(0.3, zoom) : 1);
   me.yaw -= e.movementX * s;
   me.pitch = clamp(me.pitch - e.movementY * s, -1.55, 1.55);
   lookDX += e.movementX;
   lookDY += e.movementY;
 });
+// ---------- chatt ----------
+let chatOpen = false;
+function openChat() {
+  chatOpen = true;
+  firing = false;
+  ads = false;
+  for (const k in keys) keys[k] = false;
+  $('chat-input').value = '';
+  $('chat-input').classList.remove('hidden');
+  $('chat').classList.add('open');
+  $('chat-input').focus();
+}
+function closeChat(sendIt) {
+  if (!chatOpen) return;
+  chatOpen = false;
+  const text = $('chat-input').value.trim();
+  if (sendIt && text) send({ t: 'chat', text });
+  $('chat-input').blur();
+  $('chat-input').classList.add('hidden');
+  $('chat').classList.remove('open');
+}
+function chatLine(html) {
+  const el = document.createElement('div');
+  el.className = 'line';
+  el.innerHTML = html;
+  const log = $('chat-log');
+  log.appendChild(el);
+  while (log.children.length > 8) log.firstChild.remove();
+  setTimeout(() => el.classList.add('old'), 9000);
+}
+
 document.addEventListener('pointerlockchange', () => {
   locked = document.pointerLockElement === renderer.domElement;
   if (locked) { showMenu(false); return; }
+  closeChat(false);
   firing = false;
   ads = false;
   for (const k in keys) keys[k] = false;
@@ -467,6 +531,20 @@ function onMessage(m) {
       break;
     }
     case 'ping': send({ t: 'pong', s: m.s }); break;
+    case 'pos':
+      // servern godkände inte rörelsen – tillbaka till senaste giltiga position
+      me.p = [...m.p];
+      me.v = [0, 0, 0];
+      me.sp = m.sp;
+      me.dashT = me.slideT = 0;
+      eyeY = null;
+      break;
+    case 'chat': {
+      const p = roster.get(m.id);
+      chatLine(`<b style="color:${p?.color ?? '#fff'}">${esc(p?.name ?? '?')}:</b> ${esc(m.text)}`);
+      sound.chat();
+      break;
+    }
     case 'leave': {
       const r = remotes.get(m.id);
       if (r) { r.dispose(); remotes.delete(m.id); }
@@ -576,6 +654,7 @@ function startReload() {
   gun.reloadStart = performance.now();
   gun.reloadEnd = gun.reloadStart + W.reloadMs;
   sound.reload(W.reloadMs / 1700);
+  if (!practice) send({ t: 'rl' });
 }
 
 function tryFire(now) {
@@ -715,6 +794,9 @@ function updateLocal(dt, now) {
       }
     }
     jumpQueued = false;
+    // fartspärr: glidhopp och bunny hop kan inte bygga upp fart i all oändlighet
+    const hsNow = Math.hypot(me.v[0], me.v[2]);
+    if (hsNow > PLAYER.MAX_HS) { me.v[0] *= PLAYER.MAX_HS / hsNow; me.v[2] *= PLAYER.MAX_HS / hsNow; }
 
     const wasGround = me.ground, vy = me.v[1];
     moveBody(me, solids, dt);
@@ -778,7 +860,7 @@ function updateLocal(dt, now) {
   const aiming = ads && me.alive && !gun.reloading;
   scoped = !!W.scope && aiming && weapon.adsK > 0.8;
   fovPunch *= Math.exp(-dt * 6);
-  const fov = (aiming ? (W.scope && weapon.adsK < 0.8 ? 50 : W.adsFov) : me.sprint ? 82 : 75) + fovPunch * 4;
+  const fov = (aiming ? (W.scope && weapon.adsK < 0.8 ? 50 : W.adsFov) : settings.fov + (me.sprint ? 7 : 0)) + fovPunch * 4;
   // hjärtslag när du har lite hälsa
   if (me.alive && playing && me.hp > 0 && me.hp < me.maxHp * 0.3) {
     heartT -= dt;
