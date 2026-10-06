@@ -100,6 +100,8 @@ export class Sound {
       smg: { len: 0.11, thump: 200, vol: 0.75, rate: 1.15 },
       shotgun: { len: 0.35, thump: 110, vol: 1.3, rate: 0.6 },
       sniper: { len: 0.5, thump: 90, vol: 1.5, rate: 0.55 },
+      dmr: { len: 0.32, thump: 120, vol: 1.25, rate: 0.7 },
+      lmg: { len: 0.2, thump: 130, vol: 1.1, rate: 0.8 },
     }[type] ?? { len: 0.17, thump: 160, vol: 1, rate: 0.9 };
     const t = this.ctx.currentTime;
     const local = dist === 0;
@@ -160,6 +162,39 @@ export class Sound {
     const t = this.ctx.currentTime, out = this.out(0.3, 0, 0.3);
     this.tone(out, t, 0.12, { type: 'triangle', f0: 880, g0: 0.5 });
     this.tone(out, t + 0.09, 0.3, { type: 'triangle', f0: 1320, g0: 0.5 });
+  }
+
+  levelUp() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime, out = this.out(0.35, 0, 0.5);
+    [523, 659, 784, 1047].forEach((f, i) => this.tone(out, t + i * 0.08, 0.35, { type: 'triangle', f0: f, g0: 0.45 }));
+  }
+
+  multi(n = 2) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime, out = this.out(0.35, 0, 0.4);
+    for (let i = 0; i < Math.min(n, 5); i++) this.tone(out, t + i * 0.07, 0.2, { type: 'square', f0: 660 + i * 220, g0: 0.25 });
+  }
+
+  radar() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime, out = this.out(0.3, 0, 0.6);
+    this.tone(out, t, 0.6, { type: 'sine', f0: 1400, f1: 700, g0: 0.5 });
+    this.tone(out, t + 0.15, 0.6, { type: 'sine', f0: 1400, f1: 700, g0: 0.3 });
+  }
+
+  armor() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime, out = this.out(0.4, 0, 0.3);
+    this.tone(out, t, 0.4, { type: 'sawtooth', f0: 90, f1: 180, g0: 0.5 });
+    this.noiseHit(out, t, 0.25, { type: 'bandpass', f0: 600, f1: 2400, q: 2, g0: 0.6 });
+  }
+
+  heartbeat() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime, out = this.out(0.5);
+    this.tone(out, t, 0.12, { f0: 70, f1: 45, g0: 0.9 });
+    this.tone(out, t + 0.18, 0.12, { f0: 65, f1: 42, g0: 0.6 });
   }
 
   hurt() {

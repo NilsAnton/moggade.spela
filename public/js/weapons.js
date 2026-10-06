@@ -30,13 +30,27 @@ export const WEAPONS = [
     hip: 0, adsSpread: 0, moveSpread: 0, kick: 0.01, adsFov: 75, speed: 1.1, falloff: 0,
     stats: { dmg: 1, rate: 0.4, range: 0, mobility: 1 },
   },
+  {
+    id: 'dmr', name: 'DMR', desc: 'Halvautomatisk precision. Två skott i huvudet.',
+    auto: false, fireMs: 240, mag: 12, reloadMs: 2000, body: 38, head: 85, pellets: 1,
+    hip: 0.03, adsSpread: 0.0008, moveSpread: 0.03, kick: 0.02, adsFov: 42, speed: 0.97, falloff: 0,
+    stats: { dmg: 0.75, rate: 0.35, range: 0.9, mobility: 0.55 },
+  },
+  {
+    id: 'lmg', name: 'KULSPRUTA', desc: 'Enormt magasin. Håll in och regna bly.',
+    auto: true, fireMs: 85, mag: 75, reloadMs: 3600, body: 20, head: 44, pellets: 1,
+    hip: 0.026, adsSpread: 0.006, moveSpread: 0.035, kick: 0.009, adsFov: 58, speed: 0.9, falloff: 0,
+    stats: { dmg: 0.45, rate: 0.85, range: 0.65, mobility: 0.3 },
+  },
 ];
 
 // Gun Game: vapen i ordning och hur många kills varje nivå kräver.
 export const GUNGAME = [
   { w: 0, kills: 2 },
   { w: 1, kills: 2 },
+  { w: 6, kills: 2 },
   { w: 2, kills: 2 },
+  { w: 5, kills: 2 },
   { w: 3, kills: 2 },
   { w: 4, kills: 1 },
 ];

@@ -4,12 +4,22 @@ Free-for-all-FPS i webbläsaren. Three.js på klienten och Node.js + WebSockets 
 Körs i Docker på en Synology NAS och nås från internet via en Cloudflare Tunnel, så du behöver inte öppna några portar.
 
 ## Spelet
-- Först till 25 kills vinner rundan (ändra med `KILL_LIMIT`). Efter 10 sekunder startar en ny runda.
-- Kroppsskott gör 22 i skada och headshots 55. Alla har 100 HP.
-- Du har 1,5 s spawnskydd, men det försvinner direkt om du skjuter.
-- Servern bestämmer alla träffar och kompenserar för lagg, så det man ser är det som räknas.
+- **Lägen:** Free for all (först till 25 kills) och Gun Game (klättra genom 7 vapen, kniv-kill vinner). Plus ett övningsläge med skjutbana.
+- **Banor:** Skymning, Hamnen och Neonstad. Alla röstar på nästa bana när rundan är slut.
+- **6 gubbar** med eget vapen och en förmåga på E:
+  | Gubbe | Vapen | Förmåga |
+  |---|---|---|
+  | Soldat | Autokarbin | Stim: +40 HP |
+  | Löpare | SMG | Dash + dubbelhopp |
+  | Tank | Hagelgevär | Markstöt |
+  | Skytt | Prickskytt | Superhopp |
+  | Spanare | DMR | Radar: se fiender genom väggar |
+  | Fästning | Kulspruta | Pansar: halv skada i 4 s |
+- **Progression:** XP för kills, headshots, multikills, sviter och vinster. Nivåer och rang från Rekryt till Moggad legend, nya färger låses upp och statistik sparas i webbläsaren.
+- **Känsla:** skadesiffror, multikill-utrop (dubbel, trippel, mega, monster), hjärtslag vid låg hälsa och skärmskak.
+- **Bottar** fyller upp servern (`BOTS`, `BOT_SKILL=easy|normal|hard`). De vänder sig mot den som skjuter, backar vid låg hälsa och använder förmågor.
 
-**Kontroller:** WASD gå · Shift spring · Space hoppa · Vänsterklick skjut · Högerklick sikta · R ladda om · Tab poängtavla · Esc meny
+**Kontroller:** WASD gå · Shift spring · Space hoppa · Ctrl glid · E förmåga · Vänsterklick skjut · Högerklick sikta · R ladda om · 1–6 byt gubbe · Tab poängtavla · Esc meny
 
 ## 1. Skapa tunneln i Cloudflare
 1. Gå till [one.dash.cloudflare.com](https://one.dash.cloudflare.com) och välj **Networks → Tunnels → Create a tunnel**.
@@ -48,7 +58,10 @@ Via SSH: `./update.sh 1.0.1`
 | Fil | Vad |
 |---|---|
 | `server/server.js` | Spelserver: anslutningar, träffar, kills, respawn, rundor |
-| `public/js/maps.js` | Banan (delas av server och klient) |
+| `public/js/maps.js` | Banorna (delas av server och klient) |
+| `public/js/weapons.js` / `characters.js` | Vapen och gubbar (delas) |
+| `public/js/profile.js` | XP, nivåer och statistik |
+| `server/bots.js` | Bottarnas hjärna |
 | `public/js/physics.js` | Rörelse, kollision och träffboxar (delas) |
 | `public/js/main.js` | Klienten: input, nätverk, kamera, HUD |
 | `public/js/world.js` | Grafik: texturer, himmel, ljus, stadssiluett |

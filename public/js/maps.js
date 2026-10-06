@@ -108,6 +108,57 @@ function hamnen() {
   };
 }
 
+// ---------- Neonstad: nattlig takarena med mittplattform och torn ----------
+function neonstad() {
+  const { boxes, add, add4 } = builder();
+  add(0, -1, 0, 72, 1, 72, 'ground');
+  add4(0, 0, -32, 66, 7, 2, 'wall');
+  add4(0, 7, -32, 66, 0.3, 2.4, 'metal');
+  add4(-16, 4.5, -30.96, 14, 0.12, 0.06, 'neon', { c: '#ff2bd6' });
+  add4(16, 2.2, -30.96, 14, 0.12, 0.06, 'neon', { c: '#19e3ff' });
+
+  // Mittplattform med trappor åt alla håll
+  add(0, 0, 0, 10, 3, 10, 'metal');
+  for (let k = 0; k < 6; k++) add4(0, 0, -(5.4 + 0.8 * k), 3, (6 - k) * 0.5, 0.8, 'concrete');
+  add4(-3.6, 3, -3.6, 1.6, 1.1, 1.6, 'crate');
+  add4(0, 2.94, -5.02, 10, 0.06, 0.04, 'neon', { c: '#ff2bd6' });
+
+  // Hörntorn med trappa
+  add4(-22, 0, -22, 5, 4, 5, 'concrete');
+  add4(-24.35, 4, -22, 0.3, 1, 5, 'metal');
+  add4(-22, 4, -24.35, 5, 1, 0.3, 'metal');
+  for (let k = 0; k < 8; k++) add4(-19.1 + 0.8 * k, 0, -23, 0.8, (8 - k) * 0.5, 2, 'concrete');
+  add4(-19.48, 3.2, -22, 0.04, 0.06, 5, 'neon', { c: '#19e3ff' });
+
+  // Pelare med neonband
+  add4(-9, 0, -9, 1, 5.5, 1, 'metal');
+  add4(-9, 2.6, -9, 1.04, 0.08, 1.04, 'neon', { c: '#ffb020' });
+
+  // Skydd i gångarna
+  add4(-10, 0, -17, 6, 1.1, 0.6, 'concrete');
+  add4(-17, 0, -9, 0.6, 1.1, 4, 'concrete');
+  add4(4, 0, -15, 1.5, 1.5, 1.5, 'crate');
+  add4(5.3, 0, -16.4, 1.1, 1.1, 1.1, 'crate');
+  add4(12, 0, -24, 6, 2.6, 2.6, 'container2');
+  add4(25, 0, -9, 2.6, 2.6, 6, 'container');
+  add4(25, 2.6, -9, 2.6, 2.6, 6, 'container2');
+  add4(-3, 0, -24, 1.2, 1.2, 1.2, 'crate');
+
+  return {
+    name: 'NEONSTAD',
+    bounds: 31,
+    boxes,
+    spawns: [...rot4([0, 0, -28]), ...rot4([-22, 4, -22]), ...rot4([-14, 0, -13]), ...rot4([-27, 0, -2])],
+    theme: {
+      sky: { top: '#03040c', mid: '#1b0f3d', horizon: '#c2187a', bottom: '#0b0614' },
+      fog: '#2b1244', fogNear: 25, fogFar: 170,
+      sun: '#a9b8ff', sunIntensity: 1.7, sunDir: [-0.35, 0.7, 0.4],
+      hemiSky: '#6a5cff', hemiGround: '#2a1030', hemi: 1.0,
+      windows: 1.2, exposure: 1.15,
+    },
+  };
+}
+
 // ---------- Skjutbanan: övningsläge, körs bara lokalt ----------
 function skjutbanan() {
   const { boxes, add } = builder();
@@ -171,5 +222,5 @@ function skjutbanan() {
   };
 }
 
-export const MAPS = [skymning(), hamnen()];
+export const MAPS = [skymning(), hamnen(), neonstad()];
 export const RANGE = skjutbanan();

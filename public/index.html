@@ -25,6 +25,9 @@
     <div id="dmg-indicators"></div>
     <div id="crosshair"><i class="t"></i><i class="b"></i><i class="l"></i><i class="r"></i><i class="c"></i></div>
     <div id="hitmarker"></div>
+    <div id="dmg-numbers"></div>
+    <div id="xp-feed"></div>
+    <div id="buff" class="hidden"></div>
     <div id="scope" class="hidden"></div>
     <div id="topbar"><div id="timer"></div><div id="my-score"></div><div id="leader"></div></div>
     <div id="killfeed"></div>
@@ -50,12 +53,13 @@
     <div id="death-by"></div>
     <div id="death-timer"></div>
     <div id="death-weapon"></div>
-    <div class="hint">Tryck 1–4 för att byta gubbe</div>
+    <div class="hint">Tryck 1–6 för att byta gubbe</div>
   </div>
 
   <div id="roundend" class="hidden">
     <div class="title" id="re-title"></div>
     <div id="re-next"></div>
+    <div id="re-xp"></div>
     <div id="re-timer"></div>
   </div>
 
@@ -70,7 +74,8 @@
   <div id="menu">
     <div class="panel">
       <h1>MOGGADE</h1>
-      <div class="sub">FREE FOR ALL · ARENA</div>
+      <div class="sub">FFA · GUN GAME · ARENA</div>
+      <div id="profile"></div>
       <label class="field">
         <span>Namn</span>
         <input id="name" maxlength="16" placeholder="Ditt namn" autocomplete="off">

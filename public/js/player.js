@@ -10,6 +10,20 @@ const G = {
   gun: new THREE.BoxGeometry(0.08, 0.12, 0.62),
   arm: new THREE.BoxGeometry(0.12, 0.12, 0.38),
 };
+// diamantformad markör för radarn
+const MARK = (() => {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d');
+  g.translate(32, 32);
+  g.rotate(Math.PI / 4);
+  g.fillStyle = '#fff';
+  g.fillRect(-14, -14, 28, 28);
+  g.clearRect(-7, -7, 14, 14);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+})();
 const dark = new THREE.MeshStandardMaterial({ color: 0x24272e, roughness: 0.7, metalness: 0.2 });
 const gunMat = new THREE.MeshStandardMaterial({ color: 0x15171b, roughness: 0.4, metalness: 0.7 });
 
@@ -76,8 +90,28 @@ export class RemotePlayer {
     scene.add(g);
   }
 
+  // Radar: en markör ovanför huvudet som syns genom väggar
+  setMarked(on) {
+    if (!this.marker) {
+      this.marker = new THREE.Sprite(new THREE.SpriteMaterial({ map: MARK, color: '#ff3b5c', depthTest: false, depthWrite: false, transparent: true }));
+      this.marker.scale.set(0.7, 0.7, 1);
+      this.marker.position.y = 2.65;
+      this.marker.renderOrder = 999;
+      this.group.add(this.marker);
+      this.ghost = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.9, 0.5), new THREE.MeshBasicMaterial({ color: '#ff3b5c', transparent: true, opacity: 0.35, depthTest: false, depthWrite: false }));
+      this.ghost.position.y = 0.95;
+      this.ghost.renderOrder = 998;
+      this.group.add(this.ghost);
+    }
+    this.marker.visible = this.ghost.visible = on && this.alive;
+  }
+
+  setArmor(ms) {
+    this.armorUntil = performance.now() + ms;
+  }
+
   setWeapon(w) {
-    const len = [1, 0.7, 0.9, 1.4, 0.35][w] ?? 1;
+    const len = [1, 0.7, 0.9, 1.4, 0.35, 1.2, 1.15][w] ?? 1;
     this.gun.scale.z = len;
     this.gun.position.z = -0.1 - 0.3 * len;
     this.muzzle.position.z = -0.12 - 0.62 * len;
@@ -181,12 +215,20 @@ export class RemotePlayer {
       if (this.deathT > 2.2) { g.visible = false; this.deathT = 0; }
     }
 
-    const glow = this.prot ? 0.35 + 0.25 * Math.sin(performance.now() * 0.012) : 0;
-    this.mat.emissive.set(this.color).multiplyScalar(glow);
+    const now = performance.now();
+    if (now < (this.armorUntil ?? 0) && this.alive) {
+      this.mat.emissive.set('#4cc9f0').multiplyScalar(0.5 + 0.3 * Math.sin(now * 0.02));
+    } else {
+      const glow = this.prot ? 0.35 + 0.25 * Math.sin(now * 0.012) : 0;
+      this.mat.emissive.set(this.color).multiplyScalar(glow);
+    }
   }
 
   dispose() {
     this.scene.remove(this.group);
+    this.marker?.material.dispose();
+    this.ghost?.geometry.dispose();
+    this.ghost?.material.dispose();
     this.mat.dispose();
     this.visor.dispose();
     this.tagTex.dispose();

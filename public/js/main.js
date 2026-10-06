@@ -6,7 +6,8 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { PLAYER, makeSolids, moveBody, raycastWorld, rayBox, hitboxes } from './physics.js';
 import { MAPS, RANGE } from './maps.js';
 import { WEAPONS, GUNGAME, damageAt } from './weapons.js';
-import { CHARACTERS, SLAM, STIM_HP } from './characters.js';
+import { CHARACTERS, SLAM, STIM_HP, RADAR_MS, ARMOR } from './characters.js';
+import { profile, saveProfile, addXp, levelInfo, rankName, XP, COLOR_UNLOCK } from './profile.js';
 import { buildWorld } from './world.js';
 import { Effects } from './effects.js';
 import { Sound } from './audio.js';
@@ -17,6 +18,7 @@ const COLORS = ['#ff4d6d', '#ffb703', '#4cc9f0', '#80ed99', '#c77dff', '#ff8fab'
 const WALK = 5.6, SPRINT = 8.8, ADS_SPEED = 3.4;
 const SEND_MS = 33, INTERP_MS = 100;
 const STREAKS = { 3: 'PÅ GÅNG', 5: 'DOMINERAR', 7: 'OSTOPPBAR', 10: 'GUDALIK', 15: 'MOGGAD' };
+const MULTI = { 2: 'DUBBELKILL', 3: 'TRIPPELKILL', 4: 'MEGAKILL', 5: 'MONSTERKILL' };
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -95,6 +97,8 @@ let ws = null, playing = false, locked = false, roundOver = false, killLimit = 2
 let serverOffset = null, roundEndAt = 0, roundDeadline = 0, deathAt = 0, killerId = null;
 let firing = false, ads = false, lookDX = 0, lookDY = 0;
 let eyeY = null, bobT = 0, stepT = 0, lastSend = 0, flashT = 0, shake = 0, menuAngle = 0, scoped = false;
+let radarUntil = 0, armorUntil = 0, fovPunch = 0, heartT = 0, roundXp = 0;
+const killTimes = [];
 const keys = {};
 
 // ---------- meny ----------
@@ -103,17 +107,73 @@ $('sens').value = settings.sens;
 $('vol').value = settings.vol;
 const sensLabel = () => { $('sens-val').textContent = Number(settings.sens).toFixed(2); };
 sensLabel();
-for (const c of COLORS) {
+const myLevel0 = () => levelInfo().lvl;
+if (COLORS.indexOf(settings.color) < 0 || COLOR_UNLOCK[COLORS.indexOf(settings.color)] > myLevel0()) settings.color = COLORS[0];
+COLORS.forEach((c, ci) => {
   const b = document.createElement('button');
   b.className = 'swatch' + (c === settings.color ? ' active' : '');
   b.style.background = c;
+  b.dataset.lvl = COLOR_UNLOCK[ci];
   b.onclick = () => {
-    if (playing) return;
+    if (playing || COLOR_UNLOCK[ci] > myLevel0()) return;
     settings.color = c;
     weapon.setColor(c);
     document.querySelectorAll('.swatch').forEach((s) => s.classList.toggle('active', s === b));
+    saveSettings();
   };
   $('colors').appendChild(b);
+});
+
+function renderProfile() {
+  const info = levelInfo();
+  const kd = (profile.kills / Math.max(1, profile.deaths)).toFixed(2);
+  const acc = profile.shots ? Math.round((profile.hits / profile.shots) * 100) : 0;
+  const hs = profile.kills ? Math.round((profile.heads / profile.kills) * 100) : 0;
+  $('profile').innerHTML = `
+    <div class="pf-top">
+      <div class="pf-badge">${info.lvl}</div>
+      <div class="pf-main">
+        <div class="pf-rank">${info.rank}</div>
+        <div class="pf-bar"><i style="width:${(info.cur / info.need) * 100}%"></i></div>
+        <div class="pf-xp">${info.cur} / ${info.need} XP</div>
+      </div>
+    </div>
+    <div class="pf-stats">
+      <div><b>${profile.kills}</b><span>Kills</span></div>
+      <div><b>${kd}</b><span>K/D</span></div>
+      <div><b>${hs}%</b><span>Headshot</span></div>
+      <div><b>${profile.wins}</b><span>Vinster</span></div>
+      <div><b>${profile.bestStreak}</b><span>Bästa svit</span></div>
+      <div><b>${acc}%</b><span>Träff</span></div>
+    </div>`;
+  document.querySelectorAll('.swatch').forEach((sw) => {
+    const locked = Number(sw.dataset.lvl) > info.lvl;
+    sw.classList.toggle('locked-color', locked);
+    sw.title = locked ? `Låses upp på nivå ${sw.dataset.lvl}` : '';
+  });
+}
+renderProfile();
+
+function giveXp(amount, label) {
+  if (practice || amount <= 0) return;
+  roundXp += amount;
+  const r = addXp(amount);
+  xpPopup(`+${Math.round(amount)} ${label}`);
+  if (r.levelUp) {
+    setTimeout(() => {
+      centerMsg(`NIVÅ ${r.levelUp}`, `${rankName(r.levelUp)}${COLOR_UNLOCK.includes(r.levelUp) ? ' · NY FÄRG UPPLÅST' : ''}`);
+      sound.levelUp();
+    }, 600);
+  }
+}
+
+function xpPopup(text) {
+  const el = document.createElement('div');
+  el.className = 'xp-pop';
+  el.textContent = text;
+  $('xp-feed').prepend(el);
+  while ($('xp-feed').children.length > 4) $('xp-feed').lastChild.remove();
+  setTimeout(() => el.remove(), 2200);
 }
 
 CHARACTERS.forEach((ch, i) => {
@@ -177,6 +237,7 @@ function lockPointer() {
 }
 
 function showMenu(show) {
+  if (show) renderProfile();
   $('menu').classList.toggle('hidden', !show);
   $('hud').classList.toggle('hidden', show || !playing);
   $('hud').classList.toggle('practice', practice);
@@ -245,7 +306,7 @@ document.addEventListener('pointerlockchange', () => {
 function connect() {
   $('status').textContent = 'Ansluter…';
   ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
-  ws.onopen = () => send({ t: 'join', mode, name: settings.name, color: settings.color, c: settings.char });
+  ws.onopen = () => { roundXp = 0; profile.games++; saveProfile(); send({ t: 'join', mode, name: settings.name, color: settings.color, c: settings.char, rank: levelInfo().lvl }); };
   ws.onmessage = (e) => onMessage(JSON.parse(e.data));
   ws.onclose = () => {
     ws = null;
@@ -287,6 +348,7 @@ function onMessage(m) {
       me.slideT = me.dashT = 0;
       me.slamArmed = false;
       me.abilityReady = 0;
+      radarUntil = armorUntil = 0;
       me.p = [...m.p];
       me.v = [0, 0, 0];
       me.yaw = m.yaw;
@@ -325,6 +387,11 @@ function onMessage(m) {
     }
     case 'hc':
       hitmarker(m.kill);
+      profile.hits++;
+      if (m.d) {
+        const r = remotes.get(m.v);
+        if (r) damageNumber(r.pos.clone().setY(r.pos.y + (m.head ? 2 : 1.4)), m.d, m.head, m.kill);
+      }
       if (m.head) sound.headshot(); else sound.hit();
       if (m.kill) sound.kill();
       break;
@@ -343,6 +410,10 @@ function onMessage(m) {
       roundEndAt = performance.now() + m.ms;
       const w = roster.get(m.winner);
       $('re-title').innerHTML = m.winner === me.id ? 'DU VANN!' : `<span style="color:${w?.color}">${esc(w?.name ?? '?')}</span> VANN`;
+      if (m.winner === me.id) { profile.wins++; giveXp(XP.win, 'VINST'); sound.levelUp(); }
+      giveXp(XP.round, 'RUNDA SPELAD');
+      { const li = levelInfo(); $('re-xp').innerHTML = `<b>+${roundXp} XP</b> denna runda · nivå ${li.lvl} ${li.rank} <i><em style="width:${(li.cur / li.need) * 100}%"></em></i>`; }
+      roundXp = 0;
       voteMaps = m.maps;
       votes = m.maps.map(() => 0);
       myVote = -1;
@@ -364,6 +435,7 @@ function onMessage(m) {
     case 'votes': votes = m.v; renderVotes(); break;
     case 'level':
       myLevel = m.lvl;
+      if (!m.down) giveXp(XP.level, 'NY NIVÅ');
       if (m.down) {
         centerMsg('KNIVAD!', `Ner till nivå ${m.lvl + 1}`);
         break;
@@ -381,6 +453,12 @@ function onMessage(m) {
         const p = new THREE.Vector3(...m.p);
         effects.shockwave(p);
         if (m.id !== me.id) sound.slam(camera.position.distanceTo(p), panFor(p));
+      } else if (m.k === 'armor') {
+        if (m.id === me.id) armorUntil = performance.now() + m.ms;
+        else remotes.get(m.id)?.setArmor(m.ms);
+        const r = remotes.get(m.id);
+        const pos = m.id === me.id ? new THREE.Vector3(me.p[0], me.p[1] + 1, me.p[2]) : r?.pos.clone().setY(r.pos.y + 1);
+        if (pos) effects.heal(pos);
       } else if (m.k === 'stim') {
         const pos = m.id === me.id ? new THREE.Vector3(me.p[0], me.p[1] + 1, me.p[2]) : remotes.get(m.id)?.pos.clone().setY((remotes.get(m.id)?.pos.y ?? 0) + 1);
         if (pos) effects.heal(pos);
@@ -449,6 +527,9 @@ function onKill(m) {
   remotes.get(m.v)?.die();
 
   if (m.v === me.id) {
+    profile.deaths++;
+    saveProfile();
+    killTimes.length = 0;
     me.alive = false;
     firing = false;
     scoped = false;
@@ -460,7 +541,20 @@ function onKill(m) {
     sound.death();
   } else if (m.k === me.id) {
     me.streak = m.streak;
-    centerMsg(m.head ? 'HEADSHOT' : 'ELIMINERAD', `${esc(v?.name ?? '')}${STREAKS[m.streak] ? ` · ${STREAKS[m.streak]}` : ''}`);
+    const now = performance.now();
+    while (killTimes.length && now - killTimes[0] > 4000) killTimes.shift();
+    killTimes.push(now);
+    const multi = MULTI[Math.min(killTimes.length, 5)];
+    profile.kills++;
+    if (m.head) profile.heads++;
+    profile.bestStreak = Math.max(profile.bestStreak, m.streak);
+    fovPunch = 1;
+    giveXp(XP.kill, m.head ? 'HEADSHOT-KILL' : 'KILL');
+    if (m.head) giveXp(XP.head, 'HEADSHOT');
+    if (multi) { giveXp(XP.multi * (killTimes.length - 1), multi); sound.multi(killTimes.length); }
+    if (m.streak >= 3) giveXp(XP.streak * m.streak, `SVIT ${m.streak}`);
+    centerMsg(multi ?? (m.head ? 'HEADSHOT' : 'ELIMINERAD'), `${esc(v?.name ?? '')}${STREAKS[m.streak] ? ` · ${STREAKS[m.streak]}` : ''}`);
+    if (multi && killTimes.length >= 3) feed(`<span class="sys">${esc(k?.name ?? '?')} – ${multi}!</span>`);
   }
   if (STREAKS[m.streak] && m.streak >= 5) feed(`<span class="sys">${esc(k?.name ?? '?')} ${STREAKS[m.streak]} (${m.streak} i rad)</span>`);
 }
@@ -495,6 +589,8 @@ function tryFire(now) {
   }
   gun.lastShot = now;
   gun.ammo--;
+  if (!practice && !W.melee) profile.shots++;
+  shake = Math.max(shake, W.kick * 6);
 
   camera.updateMatrixWorld();
   _fwd.set(0, 0, -1).applyQuaternion(camera.quaternion);
@@ -680,9 +776,15 @@ function updateLocal(dt, now) {
 
   const aiming = ads && me.alive && !gun.reloading;
   scoped = !!W.scope && aiming && weapon.adsK > 0.8;
-  const fov = aiming ? (W.scope && weapon.adsK < 0.8 ? 50 : W.adsFov) : me.sprint ? 82 : 75;
+  fovPunch *= Math.exp(-dt * 6);
+  const fov = (aiming ? (W.scope && weapon.adsK < 0.8 ? 50 : W.adsFov) : me.sprint ? 82 : 75) + fovPunch * 4;
+  // hjärtslag när du har lite hälsa
+  if (me.alive && playing && me.hp > 0 && me.hp < me.maxHp * 0.3) {
+    heartT -= dt;
+    if (heartT <= 0) { heartT = 0.85; sound.heartbeat(); }
+  }
   if (Math.abs(camera.fov - fov) > 0.01) {
-    camera.fov += (fov - camera.fov) * Math.min(1, dt * 14);
+    camera.fov += (fov - camera.fov) * Math.min(1, dt * (fovPunch > 0.5 ? 30 : 14));
     camera.updateProjectionMatrix();
   }
 
@@ -759,6 +861,15 @@ function useAbility() {
     me.v[1] = 13.5;
     me.ground = false;
     sound.whoosh();
+  } else if (id === 'radar') {
+    radarUntil = now + RADAR_MS;
+    send({ t: 'ab' });
+    sound.radar();
+    centerMsg('RADAR', 'Fiender syns genom väggar');
+  } else if (id === 'armor') {
+    if (practice) { armorUntil = now + ARMOR.ms; effects.heal(new THREE.Vector3(me.p[0], me.p[1] + 1, me.p[2])); }
+    send({ t: 'ab' });
+    sound.armor();
   }
   me.abilityReady = now + C.ability.cooldown;
 }
@@ -830,7 +941,7 @@ function renderScoreboard() {
   $('sb-body').innerHTML = sortedRoster().map((p, i) => `
     <tr class="${p.id === me.id ? 'me' : ''}">
       <td>${i + 1}</td>
-      <td><span class="dot" style="background:${p.color}"></span>${esc(p.name)}</td>
+      <td><span class="rk">${p.r ?? 1}</span><span class="dot" style="background:${p.color}"></span>${esc(p.name)}</td>
       <td class="muted">${gg() ? levelName(p.lvl) : CHARACTERS[p.c]?.name ?? ''}</td>
       <td>${p.k}</td><td>${p.d}</td><td>${(p.k / Math.max(1, p.d)).toFixed(2)}</td><td>${p.ping}</td>
     </tr>`).join('');
@@ -878,6 +989,10 @@ function updateHud(now) {
   $('reload-hint').textContent = gun.reloading ? 'LADDAR OM…' : lowAmmo ? 'R – LADDA OM' : '';
   $('vignette').style.opacity = me.alive && frac < 0.6 ? (1 - frac / 0.6) * 0.85 : 0;
   $('protect').classList.toggle('hidden', !(me.alive && me.protect));
+  const radarOn = me.alive && now < radarUntil, armorOn = me.alive && now < armorUntil;
+  for (const r of remotes.values()) r.setMarked(radarOn);
+  $('buff').textContent = radarOn ? `RADAR ${((radarUntil - now) / 1000).toFixed(1)}` : armorOn ? `PANSAR ${((armorUntil - now) / 1000).toFixed(1)}` : '';
+  $('buff').className = radarOn ? 'radar' : armorOn ? 'armor' : 'hidden';
   $('scope').classList.toggle('hidden', !scoped);
 
   const ch = $('crosshair');
@@ -965,6 +1080,7 @@ function damageDummy(r, amount, head) {
   if (head) stats.heads++;
   const kill = d.hp <= 0;
   hitmarker(kill);
+  damageNumber(r.pos.clone().setY(r.pos.y + (head ? 2 : 1.4)), amount, head, kill);
   if (head) sound.headshot(); else sound.hit();
   if (kill) {
     sound.kill();
@@ -1043,7 +1159,7 @@ function botShoot(d, now) {
   effects.flash(from.clone());
   sound.shoot(dist, panFor(from), 'rifle');
   if (!hit || now < (me.protectUntil ?? 0)) return;
-  me.hp = Math.max(0, me.hp - 12);
+  me.hp = Math.max(0, me.hp - (now < armorUntil ? 6 : 12));
   onMessage({ t: 'hurt', hp: me.hp, from: [d.x, d.z] });
   if (me.hp <= 0) {
     me.alive = false;
@@ -1059,6 +1175,8 @@ function botShoot(d, now) {
 }
 
 function updatePracticeHud() {
+  const radarOn = me.alive && performance.now() < radarUntil;
+  for (const d of dummies) d.r.setMarked(radarOn);
   const acc = stats.shots ? Math.round((stats.hits / stats.shots) * 100) : 0;
   const hs = stats.hits ? Math.round((stats.heads / stats.hits) * 100) : 0;
   $('practice-stats').innerHTML = `
@@ -1070,7 +1188,30 @@ function updatePracticeHud() {
       <span>Skada</span><b>${stats.dmg}</b>
       <span>Skott</span><b>${stats.shots}</b>
     </div>
-    <div class="ps-keys"><kbd>1–4</kbd> gubbe · <kbd>B</kbd> bottar ${botsOn ? 'PÅ' : 'AV'} · <kbd>T</kbd> nollställ</div>`;
+    <div class="ps-keys"><kbd>1–6</kbd> gubbe · <kbd>B</kbd> bottar ${botsOn ? 'PÅ' : 'AV'} · <kbd>T</kbd> nollställ</div>`;
+}
+
+// ---------- skadesiffror ----------
+const dmgNums = [];
+const _proj = new THREE.Vector3();
+function damageNumber(pos, amount, head, kill) {
+  const el = document.createElement('div');
+  el.className = 'dmg-num' + (head ? ' head' : '') + (kill ? ' kill' : '');
+  el.textContent = amount;
+  $('dmg-numbers').appendChild(el);
+  dmgNums.push({ el, pos, t: 0, dx: (Math.random() - 0.5) * 30 });
+}
+function updateDamageNumbers(dt) {
+  for (let i = dmgNums.length - 1; i >= 0; i--) {
+    const d = dmgNums[i];
+    d.t += dt;
+    if (d.t > 0.9) { d.el.remove(); dmgNums.splice(i, 1); continue; }
+    _proj.copy(d.pos).project(camera);
+    if (_proj.z > 1) { d.el.style.opacity = 0; continue; }
+    const x = (_proj.x * 0.5 + 0.5) * innerWidth + d.dx * d.t, y = (-_proj.y * 0.5 + 0.5) * innerHeight - d.t * 60;
+    d.el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%) scale(${1 + Math.max(0, 0.25 - d.t) * 2})`;
+    d.el.style.opacity = d.t > 0.6 ? (0.9 - d.t) / 0.3 : 1;
+  }
 }
 
 // ---------- loop ----------
@@ -1085,6 +1226,7 @@ function frame() {
   const rt = serverOffset === null ? 0 : now + serverOffset - INTERP_MS;
   for (const r of remotes.values()) r.update(rt, dt);
   effects.update(dt);
+  updateDamageNumbers(dt);
   updateHud(now);
   composer.render();
 }

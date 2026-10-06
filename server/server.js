@@ -5,9 +5,9 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { MAPS } from '../public/js/maps.js';
 import { WEAPONS, GUNGAME, damageAt } from '../public/js/weapons.js';
-import { CHARACTERS, SLAM, STIM_HP } from '../public/js/characters.js';
+import { CHARACTERS, SLAM, STIM_HP, ARMOR } from '../public/js/characters.js';
 import { makeSolids, rayBox, hitboxes, PLAYER } from '../public/js/physics.js';
-import { BOT_NAMES, newBrain, botSpawned, botThink } from './bots.js';
+import { BOT_NAMES, newBrain, botSpawned, botThink, botHurt } from './bots.js';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.PORT) || 3000;
@@ -23,6 +23,7 @@ const INTERP_MS = 100;
 const HISTORY_MS = 1000;
 const ROUND_PAUSE_MS = 10000;
 const BOT_COUNT = Number(process.env.BOTS ?? 3);
+const BOT_SKILL = ['easy', 'normal', 'hard'].includes(process.env.BOT_SKILL) ? process.env.BOT_SKILL : 'normal';
 const COLORS = ['#ff4d6d', '#ffb703', '#4cc9f0', '#80ed99', '#c77dff', '#ff8fab', '#f77f00', '#e9ecef'];
 
 // ---------- hjälpfunktioner ----------
@@ -76,7 +77,7 @@ class Room {
       killLimit: KILL_LIMIT,
       list: [...this.players.values()].map((p) => ({
         id: p.id, name: p.name, color: p.color, k: p.kills, d: p.deaths, ping: p.bot ? 0 : Math.round(p.rtt),
-        w: p.weapon, c: p.char, lvl: p.level, bot: p.bot ? 1 : 0,
+        w: p.weapon, c: p.char, lvl: p.level, bot: p.bot ? 1 : 0, r: p.rank,
       })),
     });
   }
@@ -97,6 +98,7 @@ class Room {
     const p = {
       id, ws,
       name: cleanName(m.name, id),
+      rank: clamp(Math.floor(Number(m.rank) || 1), 1, 999),
       color: COLORS.includes(m.color) ? m.color : COLORS[id % COLORS.length],
       char: ch, nextChar: ch, weapon: 0, maxHp: CHARACTERS[ch].hp, level: 0, levelKills: 0,
       lastAbility: 0, sl: 0, vote: -1,
@@ -121,7 +123,8 @@ class Room {
     const all = [...this.players.values()];
     const humans = all.filter((p) => !p.bot).length;
     const bots = all.filter((p) => p.bot);
-    const want = humans === 1 ? BOT_COUNT : 0;
+    // fyll upp så att det alltid finns minst BOT_COUNT + 1 spelare så länge någon människa är inne
+    const want = humans > 0 ? Math.max(0, BOT_COUNT + 1 - humans) : 0;
     if (bots.length < want) this.addBot(bots.length);
     else if (bots.length > want) this.leave(bots[bots.length - 1]);
   }
@@ -130,7 +133,7 @@ class Room {
     const id = nextId++;
     const ch = Math.floor(Math.random() * CHARACTERS.length);
     const p = {
-      id, ws: { readyState: 0, send() {} }, bot: newBrain(),
+      id, ws: { readyState: 0, send() {} }, bot: newBrain(BOT_SKILL), rank: 1 + Math.floor(Math.random() * 25),
       name: `BOT ${BOT_NAMES[(id + n) % BOT_NAMES.length]}`,
       color: COLORS[(id * 3) % COLORS.length],
       char: ch, nextChar: ch, weapon: 0, maxHp: CHARACTERS[ch].hp, level: 0, levelKills: 0,
@@ -181,6 +184,7 @@ class Room {
     p.weapon = this.weaponFor(p);
     p.maxHp = CHARACTERS[p.char].hp;
     p.lastAbility = 0;
+    p.armorUntil = 0;
     p.sl = 0;
     p.x = best[0]; p.y = best[1]; p.z = best[2];
     p.yaw = Math.atan2(best[0], best[2]);
@@ -283,6 +287,9 @@ class Room {
     if (ch.ability.id === 'stim') {
       p.hp = Math.min(p.maxHp, p.hp + STIM_HP);
       this.broadcast({ t: 'fx', k: 'stim', id: p.id });
+    } else if (ch.ability.id === 'armor') {
+      p.armorUntil = now + ARMOR.ms;
+      this.broadcast({ t: 'fx', k: 'armor', id: p.id, ms: ARMOR.ms });
     } else if (ch.ability.id === 'slam') {
       p.protectUntil = 0;
       this.broadcast({ t: 'fx', k: 'slam', id: p.id, p: [r2(p.x), r2(p.y), r2(p.z)] });
@@ -308,10 +315,13 @@ class Room {
   }
 
   damage(v, a, amount, head, how) {
-    if (!v.alive || Date.now() < v.protectUntil) return;
+    const now = Date.now();
+    if (!v.alive || now < v.protectUntil) return;
+    if (now < (v.armorUntil ?? 0)) amount = Math.round(amount * ARMOR.factor);
     v.hp = Math.max(0, v.hp - amount);
     const kill = v.hp <= 0;
-    send(a, { t: 'hc', head, kill });
+    send(a, { t: 'hc', head, kill, d: amount, v: v.id });
+    if (v.bot && !kill && a !== v) botHurt(v, a, now);
     send(v, { t: 'hurt', hp: v.hp, from: [r2(a.x), r2(a.z)] });
     if (kill) this.killPlayer(v, a, head, how);
   }
