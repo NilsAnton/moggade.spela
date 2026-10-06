@@ -110,7 +110,7 @@ export class Effects {
     this.scene = scene;
     this.sparks = new Particles(scene, 600, { size: 0.07, additive: true, gravity: 14, drag: 1.5 });
     this.dust = new Particles(scene, 300, { size: 0.45, additive: false, gravity: -0.4, drag: 3 });
-    this.blood = new Particles(scene, 300, { size: 0.1, additive: false, gravity: 9, drag: 1 });
+    this.bloodFx = new Particles(scene, 300, { size: 0.1, additive: false, gravity: 9, drag: 1 });
 
     const tg = new THREE.BoxGeometry(1, 1, 1).translate(0, 0, 0.5);
     this.tracers = [];
@@ -180,8 +180,8 @@ export class Effects {
   }
 
   blood(p, dir) {
-    this.blood.emit(p, dir, 16, { speed: 3.5, spread: 0.9, life: 0.5, color: [0.55, 0.02, 0.03, 1] });
-    this.blood.emit(p, dir.clone().negate(), 6, { speed: 1.5, spread: 1, life: 0.4, color: [0.4, 0.01, 0.02, 0.9] });
+    this.bloodFx.emit(p, dir, 16, { speed: 3.5, spread: 0.9, life: 0.5, color: [0.55, 0.02, 0.03, 1] });
+    this.bloodFx.emit(p, dir.clone().negate(), 6, { speed: 1.5, spread: 1, life: 0.4, color: [0.4, 0.01, 0.02, 0.9] });
   }
 
   shockwave(p) {
@@ -219,7 +219,7 @@ export class Effects {
   update(dt) {
     this.sparks.update(dt);
     this.dust.update(dt);
-    this.blood.update(dt);
+    this.bloodFx.update(dt);
 
     for (const t of this.tracers) {
       if (!t.active) continue;
