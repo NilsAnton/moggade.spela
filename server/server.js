@@ -441,6 +441,21 @@ app.get('/api/version', (_req, res) => res.json({ version: VERSION }));
 app.get('/api/rooms', (_req, res) => res.json(Object.fromEntries(Object.entries(rooms).map(([k, r]) => [k, r.players.size]))));
 // three.js byter aldrig innehåll (låst version) – får cachas länge.
 app.use('/vendor/three', express.static(path.join(ROOT, 'node_modules/three'), { maxAge: '30d', immutable: true }));
+
+// Startsidan pekar på /v/<version>/... så att varje ny version får helt nya filadresser.
+// Då kan webbläsaren aldrig blanda gamla och nya JS-filer (alla import './x.js' följer med versionen).
+const INDEX = readFileSync(path.join(ROOT, 'public/index.html'), 'utf8')
+  .replace('href="style.css"', `href="/v/${VERSION}/style.css"`)
+  .replace('src="js/main.js"', `src="/v/${VERSION}/js/main.js"`);
+const sendIndex = (_req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+  res.setHeader('CDN-Cache-Control', 'no-store');
+  res.setHeader('Cloudflare-CDN-Cache-Control', 'no-store');
+  res.type('html').send(INDEX);
+};
+app.get(['/', '/index.html'], sendIndex);
+// Versionerade filer ändras aldrig – får cachas länge.
+app.use(`/v/${VERSION}`, express.static(path.join(ROOT, 'public'), { maxAge: '365d', immutable: true }));
 // Spelets egna filer: webbläsaren ska alltid fråga efter senaste versionen, och Cloudflare ska inte spara dem.
 // Annars syns inte en ny version förrän cachen rensas.
 app.use(express.static(path.join(ROOT, 'public'), {
